@@ -66,12 +66,12 @@ One command. Six agents audit your setup in parallel. You get a prioritized fix 
 | Phase | What Happens |
 |-------|-------------|
 | **Initialize** | Backs up your config files, creates coordination folder, takes a "before" snapshot |
-| **Audit** | 6 parallel agents (haiku, 5x cheaper) scan your config, skills, MCP, and more |
-| **Analyze** | Synthesis agent (sonnet) prioritizes into Quick Wins / Medium / Deep tiers |
+| **Audit** | 6 parallel agents (4 sonnet + 2 haiku) scan your config, skills, MCP, and more |
+| **Analyze** | Synthesis agent (opus) prioritizes into Quick Wins / Medium / Deep tiers |
 | **Implement** | You choose what to fix. Creates backups, shows diffs, asks before touching anything |
 | **Verify** | Re-measures everything. Shows before/after with exact token and cost savings |
 
-The skill practices what it preaches: haiku for data gathering, sonnet only for reasoning, session folder pattern to prevent context overflow.
+The skill uses the right model for each job: sonnet for judgment calls, haiku for data gathering, opus for synthesis. Session folder pattern prevents context overflow.
 
 ## Sourced Numbers
 

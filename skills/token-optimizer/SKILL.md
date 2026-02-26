@@ -40,7 +40,9 @@ Output: `[Token Optimizer Initialized] Backup: $BACKUP_DIR | Coordination: $COOR
 
 Read `references/agent-prompts.md` for all prompt templates.
 
-Dispatch 6 agents in parallel (single message, multiple Task calls), all with `model="haiku"`:
+Dispatch 6 agents in parallel (single message, multiple Task calls):
+
+**Model assignment**: CLAUDE.md, MEMORY.md, Skills, MCP auditors use `model="sonnet"` (judgment calls). Commands, Advanced use `model="haiku"` (data gathering).
 
 | Agent | Output File | Task |
 |-------|-------------|------|
@@ -59,7 +61,7 @@ Pass `COORD_PATH` to each agent. Wait for all to complete.
 
 Read the **Synthesis Agent** prompt from `references/agent-prompts.md`.
 
-Dispatch with `model="sonnet"`. It reads all audit files and writes a prioritized plan to `{COORD_PATH}/analysis/optimization-plan.md`.
+Dispatch with `model="opus"`. It reads all audit files and writes a prioritized plan to `{COORD_PATH}/analysis/optimization-plan.md`.
 
 ---
 
@@ -147,10 +149,11 @@ NEXT STEPS (Behavioral)
 
 | Task | Model | Why |
 |------|-------|-----|
-| Audit agents (Phase 1) | `haiku` | Data gathering. 5x cheaper than Opus. |
-| Synthesis (Phase 2) | `sonnet` | Reasoning and prioritization. |
-| Orchestrator | Default | Coordination only. |
-| Verification (Phase 5) | `haiku` | Data gathering. |
+| CLAUDE.md, MEMORY.md, Skills, MCP auditors | `sonnet` | Judgment: content structure, semantic duplicates, plugin grouping |
+| Commands, Advanced auditors | `haiku` | Data gathering: counting, presence checks |
+| Synthesis (Phase 2) | `opus` | Cross-cutting prioritization across all findings |
+| Orchestrator | Default | Coordination only |
+| Verification (Phase 5) | `haiku` | Re-measurement |
 
 ---
 
