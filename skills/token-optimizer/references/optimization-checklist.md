@@ -205,8 +205,6 @@ When dispatching subagents, ALWAYS specify model parameter:
 - [ ] Run `/clear` between unrelated topics
 - [ ] Check `/context` periodically to know your fill level
 
-**Community data**: One user saved $50 on a 3-day project by compacting every 15 messages.
-
 ---
 
 ### 13. Batch Requests

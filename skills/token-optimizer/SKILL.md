@@ -16,13 +16,23 @@ You are a token optimization specialist. Audit a Claude Code setup, identify was
 
 ## Phase 0: Initialize
 
-Create coordination folder:
+1. **Backup everything first** (before touching anything):
+```bash
+BACKUP_DIR="$HOME/.claude/_backups/token-optimizer-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+cp ~/.claude/CLAUDE.md "$BACKUP_DIR/" 2>/dev/null || true
+cp ~/.claude/settings.json "$BACKUP_DIR/" 2>/dev/null || true
+cp -r ~/.claude/commands "$BACKUP_DIR/" 2>/dev/null || true
+```
+Also back up MEMORY.md if it exists in the project's `.claude/` directory.
+
+2. **Create coordination folder**:
 ```bash
 COORD_PATH="/tmp/token-optimizer-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$COORD_PATH"/{audit,analysis,plan,verification}
 ```
 
-Output: `[Token Optimizer Initialized] Coordination folder: $COORD_PATH`
+Output: `[Token Optimizer Initialized] Backup: $BACKUP_DIR | Coordination: $COORD_PATH`
 
 ---
 
@@ -62,7 +72,7 @@ Read the optimization plan and present:
 
 CURRENT STATE
 Your per-message overhead: ~X tokens
-Industry baseline: ~15-20K tokens
+Context used before first message: ~X%
 
 QUICK WINS (do these today)
 - [Action 1]: Save ~X tokens/msg (~Y%)
