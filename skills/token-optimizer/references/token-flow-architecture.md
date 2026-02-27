@@ -105,23 +105,23 @@ System reminders:      1,000 tokens
 BASELINE:            ~20,700 tokens (10% of 200K)
 ```
 
-### Unoptimized Setup (~25K baseline, Tool Search active)
+### Unaudited Setup (~33K baseline, Tool Search active)
 ```
 Core system + tools: 15,000 tokens
-MCP (ToolSearch +      1,700 tokens  (500 base + ~80 tools x 15)
+MCP (ToolSearch +      2,500 tokens  (500 base + ~130 tools x 15)
   deferred names):
-Skills (40):           4,000 tokens
-Commands (20):         1,000 tokens
-CLAUDE.md:             1,500 tokens
-MEMORY.md:             1,200 tokens
-Project CLAUDE.md:       200 tokens
-System reminders:      2,000 tokens
+Skills (50):           5,000 tokens
+Commands (25):         1,250 tokens
+CLAUDE.md:             3,500 tokens  (Leo Wong: 700-line CLAUDE.md = 12K)
+MEMORY.md:             2,500 tokens
+Project CLAUDE.md:       250 tokens
+System reminders:      3,000 tokens  (no .claudeignore)
 ---------------------------------
-BASELINE:            ~26,600 tokens (13% of 200K)
+BASELINE:            ~33,000 tokens (16% of 200K)
 ```
 
-**Difference**: ~5,900 tokens per message = 1.3x overhead
-**Note**: Pre-Tool-Search (2025), MCP alone could add 40-80K tokens. Tool Search (default since Jan 2026) reduced this by ~85%.
+**Difference**: ~12,300 tokens per message = 1.6x overhead vs optimized
+**Note**: Pre-Tool-Search (2025), MCP alone could add 40-80K tokens. Tool Search (default since Jan 2026) reduced this by ~85%. This "unaudited" baseline is a power user who has been adding to their config for 3+ months without auditing.
 
 ---
 
@@ -250,7 +250,7 @@ Message 3: 35,000 previous + new message + response = ~50,000 total
     |
 ...context grows...
     |
-AUTO-COMPACT triggers at 75-83% fill (~150K-166K of 200K window)
+AUTO-COMPACT triggers at 95% fill (~190K of 200K window) — too late for most users
     |
 Context compressed (lossy)
     |
@@ -266,7 +266,7 @@ Continue until /clear or session end
 | 70-85% | Noticeable cutting corners |
 | 85%+ | Hallucinations, drift, forgetfulness |
 
-**Recommendation**: Manually /compact at 70% to stay in peak zone.
+**Recommendation**: Manually /compact at 50-70% to stay in peak zone. Auto-compact default is 95%, which is too late. Set `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70` to auto-compact at 70%.
 
 ---
 
@@ -288,19 +288,34 @@ Continue until /clear or session end
 
 ## Caching Behavior (Prompt Caching)
 
-**What we know** (as of early 2026):
-- Claude caches prefixes >1024 tokens
-- Requires 5+ min between uses of same prefix
-- 90% cost reduction on cached portions
-- Only works if prefix is IDENTICAL
+**Confirmed active in Claude Code** (as of Feb 2026):
+- Prompt caching is ON by default. Disable with `DISABLE_PROMPT_CACHING=1`.
+- Anthropic internal data: 96-97% cache hit rate in active sessions (source: Anthropic engineer Taric)
+- The team "treats cache rate like uptime, they declare incidents when it drops" (Abhishek Ray, Feb 2026)
+- Cache order: tools first, then system prompt, then messages (chronological)
 
-**What's unclear in Claude Code**:
-- Does it cache CLAUDE.md between messages? (Unknown)
-- Does it cache system prompt? (Likely yes)
-- Does it cache MCP tool definitions? (Unknown)
-- Can we structure CLAUDE.md to maximize caching? (Unknown)
+**Pricing**:
+- Cache reads: 90% cheaper than base input ($0.30/M vs $3.00/M for Sonnet)
+- Cache writes: 25% surcharge (5-min TTL) or 100% surcharge (1-hour TTL for Max plan)
+- TTL: 5 minutes for Pro/API, 1 hour for Max plan. Timer resets with each active message.
+- Minimum cacheable size: 1,024 tokens (Sonnet/Opus), 2,048 tokens (Haiku)
 
-**Research status**: Ongoing. Community hasn't confirmed caching behavior in Claude Code specifically.
+**What gets cached**: System prompt (including CLAUDE.md), tool definitions, conversation history prefix up to last cache breakpoint.
+
+**What breaks the cache** (critical, avoid mid-session):
+- Adding/removing an MCP tool ("all 18K+ tokens after that have to be reprocessed")
+- Switching models mid-session ("caches are per model")
+- Editing CLAUDE.md mid-session
+- Timestamps or dynamic content in system prompt
+- Any change to content before a cache breakpoint
+
+**What caching does NOT fix** (why optimization still matters):
+- Context window SIZE: cached tokens still occupy your window
+- Rate limits: cache reads count toward subscription usage quotas
+- Quality: lost-in-the-middle degradation starts at 50-70% fill regardless of caching
+- Multi-agent amplification: each subagent inherits full overhead at full size
+
+**Structuring for cache hits**: Stable sections first (identity, rules), volatile sections last. This maximizes the cached prefix length.
 
 ---
 
@@ -333,6 +348,8 @@ Most Claude Code users are on Max subscriptions ($100-200/month), not per-token 
 ```
 
 ### For API Users (Per-Token Pricing)
+
+**Without caching** (worst case, e.g. cache misses from inactivity):
 ```
 Opus input: $15 per 1M tokens
 20K overhead x 100 msgs/day x 30 days = 60M tokens/mo = $900/mo overhead
@@ -340,37 +357,48 @@ Opus input: $15 per 1M tokens
 Savings from optimization: ~$675/mo
 ```
 
+**With caching** (typical, 96-97% cache hit rate):
+```
+Most overhead tokens are cache reads at 10% of base price.
+Effective cost of 20K cached overhead: ~$0.003/msg (not $0.30)
+Effective cost of 35K cached overhead: ~$0.005/msg
+Dollar savings from optimization: ~$60/mo (10x less than uncached)
+```
+
+**The honest framing**: For subscription users (Max, Pro), dollar cost is irrelevant. The real impact is context window space, rate limit quota burn, and quality degradation from fuller context.
+
 ---
 
 ## Optimization Priority Matrix
 
-| Component | Current Typical | Optimized Target | Impact x Effort |
-|-----------|-----------------|------------------|-----------------|
-| CLAUDE.md | 1,500 tokens | 600 tokens | HIGH x LOW |
-| MEMORY.md | 1,400 tokens | 400 tokens | HIGH x LOW |
-| Skills count | 4,000 tokens | 2,000 tokens | MEDIUM x MEDIUM |
-| MCP deferred tools | 1,700 tokens | 1,000 tokens | LOW x MEDIUM |
-| Commands | 1,000 tokens | 500 tokens | LOW x LOW |
+| Component | Unaudited Typical | Optimized Target | Savings | Impact x Effort |
+|-----------|-------------------|------------------|---------|-----------------|
+| CLAUDE.md | 3,500 tokens | 600 tokens | -2,900 | HIGH x LOW |
+| MEMORY.md | 2,500 tokens | 400 tokens | -2,100 | HIGH x LOW |
+| Skills (50 -> 25) | 5,000 tokens | 2,500 tokens | -2,500 | MEDIUM x MEDIUM |
+| System reminders | 3,000 tokens | 1,000 tokens | -2,000 | MEDIUM x LOW |
+| MCP deferred tools | 2,500 tokens | 1,250 tokens | -1,250 | LOW x MEDIUM |
+| Commands (25 -> 10) | 1,250 tokens | 500 tokens | -750 | LOW x LOW |
 
-**Start here**: CLAUDE.md + MEMORY.md (30 min effort, ~1,900 token savings)
+**Start here**: CLAUDE.md + MEMORY.md (30 min effort, ~5,000 token savings)
 
 ---
 
-## Real-World Example: Power User Setup (Tool Search Active)
+## Real-World Example: Unaudited Power User (Tool Search Active)
 
-**Before optimization**:
+**Before optimization** (typical after 3+ months of use):
 ```
 Core system + tools: 15,000 tokens (fixed, unavoidable)
-MCP (ToolSearch +     1,700 tokens (Tool Search active, ~80 tools)
+MCP (ToolSearch +     2,500 tokens (~130 deferred tools)
   deferred names):
-Skills (~40):         4,000 tokens
-Commands (~20):       1,000 tokens
-CLAUDE.md:            1,500 tokens
-MEMORY.md:            1,200 tokens
-Project CLAUDE.md:      200 tokens
-System reminders:     2,000 tokens
+Skills (~50):         5,000 tokens
+Commands (~25):       1,250 tokens
+CLAUDE.md:            3,500 tokens (grown organically, never trimmed)
+MEMORY.md:            2,500 tokens (duplicates CLAUDE.md content)
+Project CLAUDE.md:      250 tokens
+System reminders:     3,000 tokens (no .claudeignore)
 ---------------------------------
-BASELINE:           ~26,600 tokens (13% of 200K)
+BASELINE:           ~33,000 tokens (16% of 200K)
 ```
 
 **After config optimization**:
@@ -378,8 +406,8 @@ BASELINE:           ~26,600 tokens (13% of 200K)
 Core system + tools: 15,000 tokens (fixed)
 MCP (ToolSearch +     1,250 tokens (removed unused servers, ~50 tools)
   deferred names):
-Skills (~25):         2,500 tokens (archived 15)
-Commands (~10):         500 tokens (archived 10)
+Skills (~25):         2,500 tokens (archived 25)
+Commands (~10):         500 tokens (archived 15)
 CLAUDE.md:              600 tokens (progressive disclosure)
 MEMORY.md:              400 tokens (dedup'd with CLAUDE.md)
 Project CLAUDE.md:      200 tokens (unchanged)
@@ -387,12 +415,16 @@ System reminders:     1,000 tokens (.claudeignore)
 ---------------------------------
 BASELINE:           ~21,450 tokens (11% of 200K)
 
-CONFIG SAVINGS: ~5,150 tokens/msg (19% reduction)
+CONFIG SAVINGS: ~11,550 tokens/msg (35% reduction in overhead)
 ```
+
+**At 100 messages/day, that's 1.15M tokens of overhead saved daily.**
+
+Prompt caching means the dollar savings are modest (cached tokens cost 10% of base). But the context window space savings are real: you hit compaction later, quality stays higher longer, and each subagent inherits 11,550 fewer tokens of overhead.
 
 **Plus behavioral changes** (compound across every message):
 - Agent model selection (haiku for data): 50-60% savings on automation
-- /compact at 70%: 40-82% savings on long sessions
+- /compact at 50-70%: up to 18x reduction in conversation history (Matt Pocock measurement)
 - Extended thinking awareness: variable, potentially largest factor
 - Batching requests: 2-3x on multi-step tasks
 

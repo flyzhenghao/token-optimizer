@@ -1,6 +1,6 @@
 # Token Optimizer
 
-**Tool Search cut MCP overhead by 85%. Your config stack is still eating 13% of context.** This finds the rest.
+**Your config stack silently eats 16% of every context window.** This finds the waste and fixes it.
 
 ![Token Optimizer in action](assets/hero-terminal.svg)
 
@@ -27,22 +27,33 @@ Updates are instant: `cd ~/.claude/token-optimizer && git pull`. The installer u
 
 ## The Problem
 
-Every message to Claude Code loads your entire config stack. Core system prompt, tool definitions, skills, commands, CLAUDE.md, MEMORY.md, system reminders. All of it, every time.
+Every message to Claude Code re-sends your entire config stack. The API is stateless: system prompt, tool definitions, skills, commands, CLAUDE.md, MEMORY.md, system reminders. All of it, every time.
 
-In 2025, MCP tool definitions were the worst offender. Each tool loaded 300-850 tokens of schema upfront. 50 tools meant 25K+ tokens gone before you typed a word:
+Prompt caching cuts the **cost** of this by 90% (96-97% cache hit rate per Anthropic internal data). But caching doesn't shrink the **size**. Those tokens still occupy your context window, still count toward rate limit quotas, and still degrade output quality past 50-70% fill.
+
+A typical power user who has never audited their config: **~33,000 tokens per message (16% of 200K context)**. That's before you type a word.
+
+| What's eating your context | Typical | Source |
+|---------------------------|---------|--------|
+| Core system + tools | 15,000 | Fixed. You can't change this. |
+| Skills (50 accumulated) | 5,000 | ~100 tokens per skill frontmatter |
+| CLAUDE.md (grown organically) | 3,500 | [Leo Wong](https://youtu.be/jWl5O8K2fPk): 700-line CLAUDE.md = 12K tokens |
+| System reminders (no .claudeignore) | 3,000 | Auto-injected on file edits, budget warnings |
+| MEMORY.md (duplicates CLAUDE.md) | 2,500 | Grows without auditing |
+| MCP deferred tools (~130 tools) | 2,500 | ~15 tokens per deferred tool name |
+| Commands (25 accumulated) | 1,250 | ~50 tokens per command |
+
+### Historical context
+
+In 2025, MCP tool definitions were the worst offender. 50 tools meant 25K+ tokens gone before you typed:
 
 | Setup | Measured Overhead | Source |
 |-------|------------------|--------|
 | Zero MCP, fresh install | ~11,600 tokens | [GitHub #3406](https://github.com/anthropics/claude-code/issues/3406) |
-| 3 MCP servers | 42,600 tokens | [GitHub #11364](https://github.com/anthropics/claude-code/issues/11364) |
-| 7 MCP servers | 67,300 tokens (34% of context) | [GitHub #11364](https://github.com/anthropics/claude-code/issues/11364) |
-| Heavy MCP setup | ~82,000 tokens (41% of context) | [Scott Spence](https://scottspence.com/posts/optimising-mcp-server-context-usage-in-claude-code) |
+| 7 MCP servers | 67,300 tokens (34%) | [GitHub #11364](https://github.com/anthropics/claude-code/issues/11364) |
+| Heavy MCP setup | ~82,000 tokens (41%) | [Scott Spence](https://scottspence.com/posts/optimising-mcp-server-context-usage-in-claude-code) |
 
-[Tool Search](https://www.anthropic.com/engineering/advanced-tool-use) (default since Jan 2026) fixed the biggest offender, deferring tool definitions to ~15 tokens per tool name. An 85% reduction on MCP overhead.
-
-But the config stack still adds up. A typical power user with Tool Search active: **~26,600 tokens per message (13% of your 200K context)**. That's CLAUDE.md, MEMORY.md, 40+ skills, 20+ commands, system reminders, and the fixed 15K core system.
-
-13% doesn't sound bad until you do the math: every message re-sends it. 100 messages/day means 2.66M tokens of pure overhead. You hit compaction sooner, quality degrades past 70% fill, and your usable context is smaller than you think.
+[Tool Search](https://www.anthropic.com/engineering/advanced-tool-use) (default since Jan 2026) fixed the biggest offender: 85% reduction on MCP overhead. But the rest of the config stack still adds up, and most users never audit it.
 
 ## What It Finds
 
@@ -71,6 +82,20 @@ Not everything belongs in CLAUDE.md. The optimizer applies a three-tier architec
 
 A bloated CLAUDE.md doesn't need deleting. Coding standards move to a reference file. A deployment workflow becomes a skill. Personality spec condenses to one line with the full version in MEMORY.md. Same functionality, fraction of the per-message cost.
 
+## Why It Matters (Even With Prompt Caching)
+
+Prompt caching is real. It cuts cost by 90% on cached prefixes. But here's what caching does NOT fix:
+
+**Context window size.** 33,000 tokens of overhead means 33,000 fewer tokens for your actual work. You hit compaction sooner, and compaction is lossy.
+
+**Rate limits.** Cache reads still count toward subscription usage quotas. Smaller overhead = slower quota burn = longer before you hit rate limits.
+
+**Quality degradation.** Claude's performance degrades as context fills. Matt Pocock: "Models tend to perform worse the more things you add to their context." The "lost in the middle" effect means information between the start and end of context gets ignored.
+
+**Multi-agent amplification.** Each subagent inherits your full config overhead. Official docs: "Agent teams use approximately 7x more tokens than standard sessions." 11,550 tokens saved per message x N agents per task.
+
+**Compounding.** 11,550 tokens/msg x 100 messages/day = 1.15M tokens of overhead saved daily. That's context space you get back for actual work.
+
 ## How It Works
 
 ![5-phase optimization flow](assets/how-it-works.svg)
@@ -89,17 +114,20 @@ Right model for each job. Sonnet for judgment calls, haiku for data gathering, o
 
 All referenced stats from [Anthropic docs](https://code.claude.com/docs/en/costs), [Piebald-AI system prompt tracking](https://github.com/Piebald-AI/claude-code-system-prompts) (v2.1.59), and community measurements linked above.
 
-| What | Cost |
-|------|------|
-| Core system prompt | ~3K tokens (fixed) |
-| Built-in tool definitions | 12-17K tokens (fixed) |
-| Each MCP tool (pre-Tool Search) | 300-850 tokens |
-| Each MCP tool (with Tool Search) | ~15 tokens (name only) |
-| Each skill | ~100 tokens (frontmatter) |
-| Each command | ~50 tokens |
-| [Tool Search](https://www.anthropic.com/engineering/advanced-tool-use) MCP reduction | **85%** (Anthropic: 134K to 5K) |
-| Prompt caching on stable prefixes | **90% cost reduction** |
-| Manual `/compact` at 70% | **40-82% savings** vs auto-compact |
+| What | Number | Source |
+|------|--------|--------|
+| Core system prompt | ~3K tokens (fixed) | Piebald-AI |
+| Built-in tool definitions | 12-17K tokens (fixed) | Piebald-AI |
+| Each MCP tool (pre-Tool Search) | 300-850 tokens | Community measurement |
+| Each MCP tool (with Tool Search) | ~15 tokens (name only) | Anthropic |
+| Each skill | ~100 tokens (frontmatter) | Piebald-AI |
+| Each command | ~50 tokens | Piebald-AI |
+| [Tool Search](https://www.anthropic.com/engineering/advanced-tool-use) MCP reduction | **85%** (Anthropic: 134K to ~8.7K) | [Anthropic Engineering](https://www.anthropic.com/engineering/advanced-tool-use) |
+| Prompt caching on stable prefixes | **90% cost reduction** | [Anthropic Docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
+| Cache hit rate in active sessions | **96-97%** | Anthropic engineer Taric ([Abhishek Ray](https://youtu.be/8J5LRHJ5mDk)) |
+| /compact: conversation history | **77K to 4K tokens** (18x reduction) | [Matt Pocock](https://youtu.be/KNz6hJFLO0k) |
+| Auto-compact default threshold | **95%** (too late, set to 50-70%) | [Official docs](https://code.claude.com/docs/en/settings) |
+| Agent teams token multiplier | **~7x** standard sessions | [Official docs](https://code.claude.com/docs/en/costs) |
 
 ## Measurement Tool
 

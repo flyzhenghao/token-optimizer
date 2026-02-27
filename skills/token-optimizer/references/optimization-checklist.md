@@ -227,13 +227,18 @@ These save more than config changes over a full day of usage.
 ---
 
 ### 14. /compact and /clear Hygiene
-**Target**: 40-82% savings on long sessions
+**Target**: Keep context lean, extend productive session length
 
 **Rules**:
-- [ ] Run `/compact` at 70% context (don't wait for auto-compact at 75-83%)
+- [ ] Run `/compact` at 50-70% context (auto-compact default is 95%, which is too late. Greg: "Claude can run out of space before it finishes summarizing.")
 - [ ] Run `/compact` at natural breakpoints (after commit, after feature)
-- [ ] Run `/clear` between unrelated topics
+- [ ] Run `/clear` between unrelated topics (cheaper than compact, no summary overhead)
 - [ ] Check `/context` periodically to know your fill level
+- [ ] Or set `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70` in settings.json env block to auto-compact at 70%
+
+**Measured**: Matt Pocock showed /compact reducing conversation history from 77K to 4K tokens (18x reduction), freeing context from ~50% to 90%.
+
+**Note**: /clear is often better than /compact when switching tasks. Matt Pocock: "Compacting is useful when you want to preserve the vibes of a conversation. But /clear should be your default."
 
 ---
 
@@ -283,14 +288,32 @@ Claude: "You're welcome!"
 
 ## ADVANCED (Power Users)
 
-### 18. Prompt Caching Exploitation (Theoretical)
-**Target**: Reduce cost on repeated content
+### 18. Prompt Caching Awareness
+**Target**: Understand what caching does and doesn't fix
 
-**How it works on the API**: Claude caches prefixes >1024 tokens with 5 min TTL. Subsequent requests with same prefix are 90% cheaper.
+**Confirmed behavior**: Prompt caching IS active by default in Claude Code. Anthropic internal data shows 96-97% cache hit rate in active sessions (source: Anthropic engineer Taric, cited by Abhishek Ray, Feb 2026). The team "treats cache rate like uptime, they declare incidents when it drops."
 
-**In Claude Code**: Whether prompt caching applies to CLAUDE.md content within Claude Code's internal prompt assembly is **unconfirmed by Anthropic**. The optimization is low-effort (just reorder CLAUDE.md sections), so it is worth doing even speculatively.
+**Pricing**:
+- Cache reads: 90% cheaper than normal input ($0.30/M vs $3.00/M for Sonnet)
+- Cache writes: 25% surcharge on first request (5-min TTL) or 100% surcharge (1-hour TTL for Max plan)
+- TTL: 5 minutes for Pro/API, 1 hour for Max plan. Timer resets with each active message.
 
-**Optimization**: Structure CLAUDE.md so stable sections come FIRST, volatile sections LAST.
+**What gets cached**: System prompt (including CLAUDE.md), tool definitions, conversation history prefix up to last cache breakpoint.
+
+**What breaks the cache** (avoid these mid-session):
+- Adding/removing an MCP tool
+- Switching models
+- Editing CLAUDE.md mid-session
+- Putting timestamps in system prompt
+- Any change to content before a cache breakpoint
+
+**What caching does NOT fix**:
+- Context window SIZE (cached tokens still occupy your window)
+- Rate limit quotas (cache reads count toward subscription limits)
+- Quality degradation past 50-70% fill (lost-in-the-middle)
+- Multi-agent amplification (each subagent inherits full overhead)
+
+**Optimization**: Structure CLAUDE.md so stable sections come FIRST, volatile sections LAST. This maximizes cache prefix length.
 
 See `examples/claude-md-optimized.md` for the pattern.
 
@@ -374,33 +397,33 @@ Also track with `/cost` at end of each session and `npx ccusage@latest daily` fo
 
 ## WORKED EXAMPLE: Power User Optimization
 
-**Before** (typical power user setup, Tool Search active):
+**Before** (unaudited power user, 3+ months of use, Tool Search active):
 - Core system + built-in tools: ~15,000 tokens (fixed)
-- MCP (ToolSearch + ~80 deferred tools): ~1,700 tokens
-- Skills (~40): ~4,000 tokens
-- Commands (~20): ~1,000 tokens
-- CLAUDE.md: ~1,500 tokens
-- MEMORY.md: ~1,200 tokens
-- System reminders: ~2,000 tokens
-- **Total overhead: ~26,400 tokens/msg (13% of 200K)**
+- MCP (ToolSearch + ~130 deferred tools): ~2,500 tokens
+- Skills (~50): ~5,000 tokens
+- Commands (~25): ~1,250 tokens
+- CLAUDE.md: ~3,500 tokens (grown organically, never trimmed)
+- MEMORY.md: ~2,500 tokens (duplicates CLAUDE.md content)
+- System reminders: ~3,000 tokens (no .claudeignore)
+- **Total overhead: ~33,000 tokens/msg (16% of 200K)**
 
 **Config changes** (what the optimizer implements):
-1. CLAUDE.md: 1,500 -> 600 tokens (progressive disclosure)
-2. MEMORY.md: 1,200 -> 400 tokens (dedup with CLAUDE.md)
-3. Skills: 40 -> 25 (15 archived, ~1,500 tokens saved)
-4. Commands: 20 -> 10 (10 archived, ~500 tokens saved)
-5. MCP: removed 3 unused servers (~450 tokens saved)
-6. .claudeignore created (~1,000 tokens saved from system reminders)
-- **Config savings: ~5,350 tokens/msg (20% reduction)**
-- **After: ~21,050 tokens/msg (11% of 200K)**
+1. CLAUDE.md: 3,500 -> 600 tokens (progressive disclosure)
+2. MEMORY.md: 2,500 -> 400 tokens (dedup with CLAUDE.md)
+3. Skills: 50 -> 25 (25 archived, ~2,500 tokens saved)
+4. Commands: 25 -> 10 (15 archived, ~750 tokens saved)
+5. MCP: removed unused servers (~1,250 tokens saved)
+6. .claudeignore created (~2,000 tokens saved from system reminders)
+- **Config savings: ~11,550 tokens/msg (35% reduction in overhead)**
+- **After: ~21,450 tokens/msg (11% of 200K)**
 
 **Behavioral changes** (what the optimizer teaches):
 - Agent model selection (haiku for data): 50-60% on automation
-- /compact at 70%: 40-82% on long sessions
+- /compact at 50-70%: up to 18x reduction in conversation history (Matt Pocock measurement)
 - Extended thinking awareness: variable, potentially largest single factor
 - Batching requests: 2-3x on multi-step tasks
 - /clear between topics: prevents stale context accumulation
-- **Behavioral savings: estimated 30-50% daily cost reduction on top of config**
+- **Behavioral savings: extend productive session length, reduce compaction cycles, improve output quality**
 
 The config changes shrink your per-message overhead. The behavioral changes compound across every message, every session, every day. Together they are the full picture.
 
