@@ -1,6 +1,6 @@
 # Token Optimizer
 
-**Most Claude Code power users lose 40-50% of their context window before typing a word.** This shows you where it goes and gets it back.
+**Run `/context` on a fresh Claude Code session. See how much is already gone. This tool shows you where it went and gets it back.**
 
 ![Token Optimizer in action](skills/token-optimizer/assets/hero-terminal.svg)
 
@@ -23,151 +23,104 @@ git clone https://github.com/alexgreensh/token-optimizer.git ~/.claude/token-opt
 ln -s ~/.claude/token-optimizer/skills/token-optimizer ~/.claude/skills/token-optimizer
 ```
 
-Updates are instant: `cd ~/.claude/token-optimizer && git pull`. The installer uses a symlink, so the skill always loads from the repo directory.
+Updates: `cd ~/.claude/token-optimizer && git pull`. The installer uses a symlink, so the skill always loads from the repo.
 
 ## The Problem
 
-Every message to Claude Code re-sends your entire config stack. The API is stateless: system prompt, tool definitions, skills, commands, CLAUDE.md, MEMORY.md, system reminders, and an autocompact buffer. All of it, every time.
+Every message you send to Claude Code re-sends everything: system prompt, tool definitions, MCP servers, skills, commands, CLAUDE.md, MEMORY.md, and system reminders. The API is stateless. No memory between messages. The full stack, replayed every time.
 
-Prompt caching cuts the **cost** by 90% ([96-97% cache hit rate](https://code.claude.com/docs/en/costs) per Anthropic). But caching doesn't shrink the **size**. Those tokens still occupy your context window, still count toward rate limits, and still degrade output quality past 50-70% fill.
+Prompt caching makes this [cheap](https://code.claude.com/docs/en/costs) (90% cost reduction on cached tokens). But cheap doesn't mean small. Those tokens still fill your context window, count toward rate limits, and degrade output quality past 50-70% fill.
 
-The commonly cited "16% overhead" describes **one component**. The full picture is much larger.
+The more you've customized Claude Code, the worse it gets.
 
-### A. Fixed Overhead (everyone pays, can't change)
+![Where your context window goes](skills/token-optimizer/assets/user-profiles.svg)
 
-| Component | Tokens | % of 200K | Source |
-|-----------|--------|-----------|--------|
-| System prompt | ~3K | 1.5% | [GitHub #8676](https://github.com/anthropics/claude-code/issues/8676) |
-| Built-in tools | 12-17K | 6-8.5% | `/context` output, varies by version |
+### Where it all goes
 
-### B. Autocompact Buffer (reserved, not consumed, but unavailable)
+Your 200K context window gets eaten from multiple directions:
 
-When autocompact is enabled (the default), Claude Code reserves a chunk of your window for compaction headroom, completion buffer, and response generation. This space holds no data, but you can't use it.
+**Fixed overhead** (everyone pays, can't change): System prompt (~3K tokens) plus built-in tool definitions (12-17K tokens). About 8-10% of your window, gone before anything else loads.
 
-| Version | Tokens Reserved | % of 200K | Source |
-|---------|----------------|-----------|--------|
-| Pre-2.0 (2025) | ~45K | 22.5% | [Reddit](https://www.reddit.com/r/ClaudeCode/comments/1nubc77/what_is_reserved_450k_tokens_brand_new_session_25/) |
-| Sonnet 4.5 bug | ~77K | 38.5% | [Reddit](https://www.reddit.com/r/ClaudeAI/comments/1p7xwty/sonnet_45_autocompact_buffer_increased_to_385_77k/) |
-| Current (2026) | ~33K | 16.5% | [claudefa.st](https://claudefa.st/blog/guide/mechanics/context-buffer-management) |
+**Autocompact buffer**: When autocompact is on (the default), Claude Code reserves ~33K tokens for compaction headroom. That's 16.5% of your window holding nothing. Run `/context` on a fresh session to see it.
 
-When Claude Code reports "25% remaining," you actually have only ~8.5% before compaction fires. The `remaining_percentage` in StatusLine [includes the buffer](https://claudefa.st/blog/tools/hooks/context-recovery-hook).
+**MCP tools**: The biggest variable. Anthropic's own engineering team [measured 134K tokens consumed by tool definitions](https://www.anthropic.com/engineering/advanced-tool-use) before optimization. [Tool Search](https://www.anthropic.com/engineering/advanced-tool-use) (default since Jan 2026) reduced this by 85%, but MCP servers still add up: each deferred tool costs ~15 tokens, plus server instructions.
 
-One user confirmed: "After executing a `/clear` with autocompact off, I have 175k tokens of Free Space." Another saw starting context drop from 43% "used" to 19% [just by disabling autocompact](https://www.reddit.com/r/ClaudeAI/comments/1p05r7p/my_claude_code_context_window_strategy_200k_is/).
+**Your config stack** (what this tool optimizes): CLAUDE.md that's grown organically. MEMORY.md that duplicates half of it. 50+ skills you installed and forgot. Commands you never use. [`@imports`](https://code.claude.com/docs/en/memory) pulling in files you didn't realize. [`.claude/rules/`](https://code.claude.com/docs/en/memory) adding up quietly. No `.claudeignore` to block system reminder injection.
 
-### C. MCP Tools (the variable context killer)
+A real power user's session baseline: **43,000 tokens consumed** plus the 33K autocompact buffer. That's **38% of the 200K window unavailable** before typing a single word.
 
-MCP tool definitions are the most variable overhead. Without Tool Search, every tool schema loads in full at startup. Real measurements from developer blogs and Anthropic internal data:
+## What This Does
 
-| MCP Server | Tokens | % of 200K | Source |
-|------------|--------|-----------|--------|
-| GitHub (35 tools) | ~26K | 13% | [Anthropic Engineering](https://www.anthropic.com/engineering/advanced-tool-use) |
-| Slack (11 tools) | ~21K | 10.5% | [Anthropic Engineering](https://www.anthropic.com/engineering/advanced-tool-use) |
-| Chrome DevTools (21 tools) | ~31.7K | 15.9% | [paddo.dev](https://paddo.dev/blog/claude-code-hidden-mcp-flag/) |
-| AWS (4 servers) | ~18.3K | 9.2% | [GitHub #7172](https://github.com/anthropics/claude-code/issues/7172) |
+One command. Six parallel agents audit your entire setup. You get a prioritized list of exactly what's eating your context and how to fix it.
 
-Anthropic themselves measured [134K tokens consumed by tool definitions](https://www.anthropic.com/engineering/advanced-tool-use) in internal testing before optimization. That's 67% of the 200K window gone before any conversation.
+```
+> /token-optimizer
 
-[Tool Search](https://www.anthropic.com/engineering/advanced-tool-use) (default since Jan 2026) defers tool loading: ~15 tokens per tool name instead of the full schema. This is an [85% reduction](https://www.anthropic.com/engineering/advanced-tool-use). If you're running Claude Code v2.1.7+ and haven't disabled it, you already have this. The optimizer checks whether Tool Search is active and flags it if missing.
+[Token Optimizer] Backing up config...
+Dispatching 6 audit agents...
 
-### D. Config Stack (what we directly optimize)
+YOUR SETUP
+Per-message overhead:  ~43,000 tokens
+Context used:          38% before your first message
 
-| Component | Typical Unaudited | Optimized Target | Source |
-|-----------|------------------|------------------|--------|
-| CLAUDE.md (grown organically) | 1,500-4,000 | ~800 | [SFEIR FAQ](https://institute.sfeir.com/en/claude-code/claude-code-memory-system-claude-md/faq/) |
-| MEMORY.md (duplicates CLAUDE.md) | 1,400-4,000 | ~400 | `/context` measurement |
-| Skills (50+ accumulated) | 5,000+ | 2,000-3,000 | ~100 tokens/skill frontmatter |
-| Commands (25+ accumulated) | 1,250+ | 500 | ~50 tokens/command |
-| System reminders (no .claudeignore) | 2,000-3,000 | 1,000 | Auto-injected, partially controllable |
+QUICK WINS
+  Slim CLAUDE.md + MEMORY.md:    -5,200 tokens/msg
+  Archive 30 unused skills:      -3,000 tokens/msg
+  Prune MCP + add .claudeignore: -7,000 tokens/msg
 
-### The Full Picture: User Profiles
+Total: -15,200 tokens/msg recovered
 
-The "16% overhead" figure most closely matches either the autocompact buffer (16.5%) or MCP tools from two mid-weight servers ([paddo.dev measured exactly 15.9%](https://paddo.dev/blog/claude-code-hidden-mcp-flag/)). It describes one component, not the whole story.
+Ready to implement? Everything backed up first.
+```
 
-| Profile | Unavailable | Free for Work | After Optimization |
-|---------|-------------|---------------|--------------------|
-| Bare minimum (no MCP, autocompact OFF) | 7-10% | 90-93% | Baseline |
-| Default (no MCP, autocompact ON) | 24-26% | 74-76% | ~10% (autocompact off) |
-| Light user (1 MCP server) | 29-32% | 68-71% | ~15-18% |
-| **Avg power user (3 MCP servers)** | **42-53%** | **47-58%** | **~25-30%** |
-| Heavy user (5+ MCP servers) | 57-72% | 28-43% | ~30-40% |
+Everything gets backed up before any change. You see diffs. You approve each fix. Nothing irreversible.
 
-Sources: [GitHub #8676](https://github.com/anthropics/claude-code/issues/8676), [claudefa.st](https://claudefa.st/blog/guide/mechanics/context-buffer-management), [paddo.dev](https://paddo.dev/blog/claude-code-hidden-mcp-flag/), [Anthropic Engineering](https://www.anthropic.com/engineering/advanced-tool-use), [Reddit](https://www.reddit.com/r/ClaudeAI/comments/1q7h2pj/understanding_claude_codes_context_window/), [GitHub #13536](https://github.com/anthropics/claude-code/issues/13536).
-
-**Real example**: A power user's session baseline measured at **43,392 tokens** average across 8 sessions (system prompt + tools + 170 deferred MCP tools + 59 skills + 59 commands + CLAUDE.md + MEMORY.md). That's 21.7% consumed, plus the 33K autocompact buffer, totaling ~38% unavailable before the first message.
-
-## What You Get Back
-
-### Scenario A: Autocompact ON (safe, recommended for most)
-
-Recover 15-25% of your context window through config cleanup and MCP optimization.
-
-| Optimization | Recovery | How |
-|-------------|----------|-----|
-| Tool Search enablement (if missing) | 28-48K tokens (14-24%) | Single setting change. [85% reduction](https://www.anthropic.com/engineering/advanced-tool-use) in MCP overhead. |
-| Config stack cleanup | ~10K tokens (5%) | CLAUDE.md, MEMORY.md deduplication, skill/command archival |
-| MCP server pruning | Variable | Disable unused servers, consolidate duplicates |
-
-### Scenario B: Autocompact OFF (advanced, manual compaction)
-
-Everything in Scenario A, plus autocompact buffer recovery. Recover 30-45% of your context window.
-
-| Optimization | Recovery | How |
-|-------------|----------|-----|
-| All Scenario A savings | 15-25% | Same as above |
-| Autocompact buffer recovery | 33K tokens (16.5%) | `"autoCompact": false` in settings.json |
-
-**Tradeoff**: You must manage `/compact` manually. Run it at 50-70% context fill, at natural breakpoints (after a feature, after a commit, after a topic change). The optimizer explains when and how.
-
-### Behavioral Savings (free, compound over time)
-
-These don't recover context space, but they reduce cost and improve quality:
-
-| Habit | Impact | Source |
-|-------|--------|--------|
-| `/compact` at 50-70% instead of waiting for auto-compact at ~83% | Better output quality, fewer hallucinations | [Best Practices](https://code.claude.com/docs/en/best-practices) |
-| Haiku for data-gathering agents (5x cheaper than Opus) | 60-70% savings on multi-agent sessions | [Anthropic Docs](https://code.claude.com/docs/en/costs) |
-| Plan mode for complex tasks (Shift+Tab x2) | 50-70% fewer iteration cycles | Boris Cherny (Claude Code creator) |
-| Batch related requests into one message | Saves full context re-send per message | Stateless API, each message re-sends everything |
-| `/clear` between unrelated topics | Fresh context = better quality + lower cost | [Community consensus](https://www.reddit.com/r/ClaudeAI/comments/1r6buxo/how_do_you_guys_keep_token_consumption_down_in/) |
-
-## What It Finds
-
-![Before and after optimization](skills/token-optimizer/assets/before-after.svg)
-
-One command. Six parallel agents audit your setup. You get a prioritized fix list with exact token savings.
+### What it audits
 
 | Area | What It Catches |
 |------|----------------|
-| **CLAUDE.md** | Content that should be skills or reference files, duplication with MEMORY.md, poor cache structure |
-| **MEMORY.md** | Overlap with CLAUDE.md, verbose history that should be condensed |
-| **Skills & Plugins** | Plugin-bundled skills you never use, semantic duplicates, archived skills still loading |
-| **MCP Servers** | Unused servers, duplicate tools across servers and plugins, missing Tool Search |
-| **Commands** | Rarely-used commands, merge candidates |
-| **Advanced** | Missing .claudeignore, no hooks, poor cache structure, no monitoring |
+| **CLAUDE.md** | Content that should be skills or reference files. Duplication with MEMORY.md. [`@imports`](https://code.claude.com/docs/en/memory) pulling in more than you realize. Poor cache structure. |
+| **MEMORY.md** | Overlap with CLAUDE.md. Verbose entries. Content past the [200-line auto-load cap](https://code.claude.com/docs/en/memory). |
+| **Skills** | Unused skills still loading frontmatter (~100 tokens each). Duplicates. Archived skills in the wrong directory still loading. |
+| **MCP Servers** | Broken/unused servers. Duplicate tools across servers and plugins. Missing [Tool Search](https://www.anthropic.com/engineering/advanced-tool-use). |
+| **Commands** | Rarely-used commands inflating the menu (~50 tokens each). |
+| **Rules & Advanced** | [`.claude/rules/`](https://code.claude.com/docs/en/memory) overhead. Missing `.claudeignore`. No hooks. No monitoring. |
 
-### The Fix: Progressive Disclosure
+### The fix: progressive disclosure
 
-Not everything belongs in CLAUDE.md. The optimizer applies a three-tier architecture:
+Not everything needs to load every message. The optimizer moves content to where it costs the least:
 
-| Tier | Where | Cost | What Goes Here |
-|------|-------|------|----------------|
-| **Always loaded** | CLAUDE.md | Every message (~800 tokens target) | Identity, critical rules, key paths |
-| **On demand** | Skills, reference files | ~100 tokens in menu. Full content only when invoked. | Workflows, tool configs, detailed standards |
-| **Explicit** | Project files | Zero until read | Full guides, templates, documentation |
+| Where | Token Cost | What Goes Here |
+|-------|-----------|----------------|
+| **CLAUDE.md** | Every message (~800 token target) | Identity, critical rules, key paths |
+| **Skills & references** | ~100 tokens in menu, full content only when invoked | Workflows, configs, detailed standards |
+| **Project files** | Zero until explicitly read | Guides, templates, documentation |
 
-A bloated CLAUDE.md doesn't need deleting. Coding standards move to a reference file. A deployment workflow becomes a skill. Personality spec condenses to one line with the full version in MEMORY.md. Same functionality, fraction of the per-message cost.
+A bloated CLAUDE.md doesn't need deleting. Coding standards move to a reference file. A deployment workflow becomes a skill. Same functionality, fraction of the per-message cost.
 
-## Why It Matters (Even With Prompt Caching)
+## Typical Results
 
-Prompt caching is real. It cuts cost by 90% on cached prefixes. But caching does NOT fix:
+Results depend on your setup. Heavier setups save more.
 
-**Context window size.** Every token of overhead is one fewer token for your actual work. You hit compaction sooner, and compaction is lossy.
+**Config cleanup** (what the tool directly changes):
 
-**Rate limits.** Cache reads still count toward subscription usage quotas. Smaller overhead = slower quota burn = longer before you hit rate limits.
+| Starting Point | Typical Recovery |
+|----------------|-----------------|
+| Power user (50+ skills, 3+ MCP servers, bloated config) | 5-15% of context window |
+| Missing Tool Search (pre-Jan 2026 or disabled) | Up to 57% — [134K down to ~8.7K](https://www.anthropic.com/engineering/advanced-tool-use) |
+| Lighter setup (few skills, 1 MCP server) | 3-8% |
 
-**Quality degradation.** Model performance degrades as context fills. Information in the middle of context gets deprioritized by the attention mechanism. The [community guideline](https://www.reddit.com/r/ClaudeAI/comments/1p05r7p/my_claude_code_context_window_strategy_200k_is/): starting context usage should stay below 20% of the total window.
+**Advanced option**: Disabling autocompact and managing `/compact` manually recovers an additional ~16% of your window. The optimizer explains the tradeoff and helps you decide.
 
-**Multi-agent amplification.** Each subagent inherits your full config overhead. [Official docs](https://code.claude.com/docs/en/costs): "Agent teams use approximately 7x more tokens than standard sessions." Every token you cut from overhead gets multiplied across every agent.
+**Behavioral savings** (free, compound across every session):
+
+| Habit | Why It Matters |
+|-------|---------------|
+| `/compact` at 50-70% instead of auto-compact at ~83% | Better output quality, fewer hallucinations |
+| [Haiku for data-gathering agents](https://code.claude.com/docs/en/costs) | 5x cheaper than Opus for file reads and counting |
+| `/clear` between unrelated topics | Fresh context, no stale information dragging quality down |
+| Batch requests into one message | Each message re-sends your full config stack |
+| [Plan mode](https://code.claude.com/docs/en/best-practices) for complex tasks | 50-70% fewer iteration cycles |
 
 ## How It Works
 
@@ -175,71 +128,45 @@ Prompt caching is real. It cuts cost by 90% on cached prefixes. But caching does
 
 | Phase | What Happens |
 |-------|-------------|
-| **Initialize** | Backs up config, creates coordination folder, takes a "before" snapshot |
-| **Audit** | 6 parallel agents (4 sonnet + 2 haiku) scan config, skills, MCP, and more |
-| **Analyze** | Synthesis agent (opus) prioritizes into Quick Wins / Medium / Deep tiers |
-| **Implement** | You choose what to fix. Backups, diffs, approval before any change |
+| **Initialize** | Backs up your config, takes a "before" snapshot |
+| **Audit** | 6 parallel agents scan everything (sonnet for judgment, haiku for counting) |
+| **Analyze** | Synthesis agent (opus) prioritizes fixes by impact |
+| **Implement** | You choose what to fix. Diffs and approval before every change |
 | **Verify** | Re-measures everything, shows before/after with exact savings |
 
-Right model for each job. Sonnet for judgment calls, haiku for data gathering, opus for cross-cutting synthesis. Session folder pattern prevents agent output from flooding your context.
+Right model for each job. Session folder pattern keeps agent output from flooding your context.
 
-## Sourced Numbers
+## Why It Matters Even With Caching
 
-Every claim in this README traces to a specific source. No vibes.
+Prompt caching cuts cost by 90%. But it doesn't shrink your context window.
 
-| What | Number | Source |
-|------|--------|--------|
-| System prompt | ~3K tokens (fixed) | [GitHub #8676](https://github.com/anthropics/claude-code/issues/8676) `/context` output |
-| Built-in tool definitions | 12-17K tokens (fixed) | [paddo.dev](https://paddo.dev/blog/claude-code-hidden-mcp-flag/), `/context` output |
-| Autocompact buffer (current) | ~33K tokens reserved (16.5%) | [claudefa.st](https://claudefa.st/blog/guide/mechanics/context-buffer-management) |
-| MCP tools without Tool Search | 25-134K tokens | [Anthropic Engineering](https://www.anthropic.com/engineering/advanced-tool-use) |
-| Tool Search MCP reduction | **85%** (134K to ~8.7K) | [Anthropic Engineering](https://www.anthropic.com/engineering/advanced-tool-use) |
-| Each deferred MCP tool | ~15 tokens (name only) | [Anthropic Engineering](https://www.anthropic.com/engineering/advanced-tool-use) |
-| Each skill | ~100 tokens (frontmatter) | `/context` output |
-| Each command | ~50 tokens | `/context` output |
-| Prompt caching on stable prefixes | **90% cost reduction** | [Anthropic Docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
-| Cache hit rate in active sessions | **96-97%** | [Anthropic internal data](https://code.claude.com/docs/en/costs) |
-| Auto-compact trigger | ~83.5% fill (~167K tokens) | [claudefa.st](https://claudefa.st/blog/guide/mechanics/context-buffer-management) |
-| Agent teams token multiplier | **~7x** standard sessions | [Official docs](https://code.claude.com/docs/en/costs) |
-| Context window management | Keep starting usage <20% | [Best Practices](https://code.claude.com/docs/en/best-practices) |
-
-### Key References
-
-1. [GitHub #8676](https://github.com/anthropics/claude-code/issues/8676) - Real `/context` output from a brand-new session
-2. [claudefa.st: Context Buffer Management](https://claudefa.st/blog/guide/mechanics/context-buffer-management) - Autocompact buffer analysis (45K to 33K reduction)
-3. [paddo.dev: Claude Code's Hidden MCP Flag](https://paddo.dev/blog/claude-code-hidden-mcp-flag/) - 15.9% measurement, Tool Search discovery
-4. [Anthropic Engineering: Advanced Tool Use](https://www.anthropic.com/engineering/advanced-tool-use) - Tool Search, 134K to 8.7K internal benchmark
-5. [Reddit: Reserved 45K tokens](https://www.reddit.com/r/ClaudeCode/comments/1nubc77/what_is_reserved_450k_tokens_brand_new_session_25/) - Buffer present on fresh sessions
-6. [Reddit: Context window strategy](https://www.reddit.com/r/ClaudeAI/comments/1p05r7p/my_claude_code_context_window_strategy_200k_is/) - Autocompact OFF results
-7. [GitHub #7172](https://github.com/anthropics/claude-code/issues/7172) - AWS MCP: 18.3K tokens static overhead
-8. [GitHub #13536](https://github.com/anthropics/claude-code/issues/13536) - New session 80K token bug reports
-9. [selfservicebi.co.uk](https://selfservicebi.co.uk/analytics%20edge/improve%20the%20experience/2025/11/23/the-hidden-cost-of-mcps-and-custom-instructions-on-your-context-window.html) - MCP + custom instructions hidden cost analysis
-10. [Reddit: Cutting system prompt in half](https://www.reddit.com/r/ClaudeAI/comments/1peuemt/cutting_claude_codes_system_prompt_in_half_to/) - 18K to 10K through compression
+- **You hit compaction sooner** — compaction is lossy, every cycle throws away context
+- **Rate limits burn faster** — cache reads still count toward your subscription quota
+- **Quality degrades** — performance drops as context fills, especially past 70%
+- **Agents multiply it** — each subagent inherits your full overhead. [Agent teams use ~7x more tokens](https://code.claude.com/docs/en/costs) than standard sessions
 
 ## Measurement Tool
 
-Standalone Python script for measuring token overhead:
+Standalone script. No dependencies. Python 3.8+.
 
 ```bash
 python3 ~/.claude/skills/token-optimizer/scripts/measure.py report
 
-# Save snapshots for comparison
+# Save snapshots for before/after comparison
 python3 ~/.claude/skills/token-optimizer/scripts/measure.py snapshot before
 # ... make changes ...
 python3 ~/.claude/skills/token-optimizer/scripts/measure.py snapshot after
 python3 ~/.claude/skills/token-optimizer/scripts/measure.py compare
 ```
 
-No dependencies. Python 3.8+.
-
 ## vs Alternatives
 
 | Tool | What It Does | Limitation |
 |------|-------------|------------|
-| **Manual audit** | Flexible | Takes hours. No measurement. Easy to miss things |
-| **ccusage** | Monitors spending | Shows what you spent, not why or how to fix it |
-| **token-optimizer-mcp** | Caches MCP calls | One dimension only |
-| **This** | Audits, diagnoses, fixes, measures | Requires Claude Code |
+| **Manual audit** | Flexible | Takes hours. No measurement. Easy to miss things. |
+| **ccusage** | Monitors spending | Shows cost, not context waste or how to fix it. |
+| **token-optimizer-mcp** | Caches MCP calls | One dimension only. |
+| **This** | Audits, diagnoses, fixes, measures | Requires Claude Code. |
 
 ## What's Inside
 
@@ -250,6 +177,7 @@ skills/token-optimizer/
     hero-terminal.svg                  Animated terminal demo
     before-after.svg                   Token breakdown comparison
     how-it-works.svg                   5-phase flow diagram
+    user-profiles.svg                  Context usage by setup type
   references/
     agent-prompts.md                   8 agent prompt templates
     implementation-playbook.md         Fix implementation details

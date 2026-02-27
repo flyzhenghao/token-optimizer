@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" width="800" height="420">
+  <!--
+    Token Optimizer: Context window usage by setup type.
+    Sequential fade-in (not looping). Catppuccin Mocha palette.
+    Bar widths: % of 200K mapped to 680px track.
+    Default 25% = 170px. Light 30% = 204px. Power 38% = 258px.
+    Optimized 30% = 204px (matches Light, showing recovery).
+  -->
+
+  <!-- Background -->
+  <rect width="800" height="420" rx="12" fill="#1e1e2e"/>
+
+  <!-- Title -->
+  <text x="400" y="36" fill="#cdd6f4" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="18" font-weight="bold" text-anchor="middle">How Much of Your Context Window Is Already Gone?</text>
+  <text x="400" y="56" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="12" text-anchor="middle">Run /context on a fresh session. Find your row. Each bar = 200K window.</text>
+
+  <!-- Row 1: Default Setup -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1" dur="0.4s" begin="0.3s" fill="freeze"/>
+
+    <text x="60" y="95" fill="#bac2de" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" font-weight="bold">Default Setup</text>
+    <text x="60" y="110" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11">No MCP servers, autocompact on</text>
+
+    <!-- Track -->
+    <rect x="60" y="118" width="680" height="26" rx="6" fill="#313244"/>
+    <!-- Overhead: 25% = 170px -->
+    <rect x="60" y="118" width="170" height="26" rx="6" fill="#f9e2af" opacity="0.8"/>
+    <text x="145" y="136" fill="#1e1e2e" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="12" font-weight="bold" text-anchor="middle">25%</text>
+    <text x="400" y="136" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11" text-anchor="middle">75% free for your work</text>
+  </g>
+
+  <!-- Row 2: Light User -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1" dur="0.4s" begin="0.8s" fill="freeze"/>
+
+    <text x="60" y="168" fill="#bac2de" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" font-weight="bold">Light User</text>
+    <text x="60" y="183" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11">1-2 MCP servers, 15 skills</text>
+
+    <rect x="60" y="191" width="680" height="26" rx="6" fill="#313244"/>
+    <!-- Overhead: 30% = 204px -->
+    <rect x="60" y="191" width="204" height="26" rx="6" fill="#f9e2af" opacity="0.8"/>
+    <text x="162" y="209" fill="#1e1e2e" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="12" font-weight="bold" text-anchor="middle">30%</text>
+    <text x="420" y="209" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11" text-anchor="middle">70% free</text>
+  </g>
+
+  <!-- Row 3: Power User -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1" dur="0.4s" begin="1.3s" fill="freeze"/>
+
+    <text x="60" y="241" fill="#fab387" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" font-weight="bold">Power User</text>
+    <text x="60" y="256" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11">3+ MCP servers, 50+ skills, growing CLAUDE.md</text>
+
+    <rect x="60" y="264" width="680" height="26" rx="6" fill="#313244"/>
+    <!-- Overhead: 38% = 258px -->
+    <rect x="60" y="264" width="258" height="26" rx="6" fill="#fab387" opacity="0.85"/>
+    <text x="189" y="282" fill="#1e1e2e" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="12" font-weight="bold" text-anchor="middle">38%</text>
+    <text x="460" y="282" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11" text-anchor="middle">62% free</text>
+  </g>
+
+  <!-- Transition arrow -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1" dur="0.4s" begin="1.9s" fill="freeze"/>
+    <text x="710" y="308" fill="#a6e3a1" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="12" font-weight="bold" text-anchor="end">&#x2193; after optimizer</text>
+  </g>
+
+  <!-- Row 4: After Optimization -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1" dur="0.4s" begin="2.4s" fill="freeze"/>
+
+    <text x="60" y="335" fill="#a6e3a1" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" font-weight="bold">Power User (optimized)</text>
+    <text x="60" y="350" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11">Same setup, config cleaned up</text>
+
+    <rect x="60" y="358" width="680" height="26" rx="6" fill="#313244"/>
+    <!-- Overhead: 30% = 204px (recovered from 38%) -->
+    <rect x="60" y="358" width="204" height="26" rx="6" fill="#a6e3a1" opacity="0.85"/>
+    <text x="162" y="376" fill="#1e1e2e" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="12" font-weight="bold" text-anchor="middle">30%</text>
+    <text x="420" y="376" fill="#a6e3a1" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="12" text-anchor="middle">70% free (+8% recovered)</text>
+  </g>
+
+  <!-- Footer -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1" dur="0.4s" begin="3.0s" fill="freeze"/>
+    <text x="400" y="408" fill="#585b70" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="11" text-anchor="middle">Disable autocompact manually for up to +16% more. The optimizer explains the tradeoff.</text>
+  </g>
+</svg>

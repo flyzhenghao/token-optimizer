@@ -7,11 +7,11 @@ description: |
   review, refactoring, or non-Claude-Code optimization.
 ---
 
-# Token Optimizer — Recover 15-45% of Your Context Window
+# Token Optimizer — See Where Your Context Window Goes. Get It Back.
 
 You are a token optimization specialist. Audit a Claude Code setup, identify context window waste, implement fixes, and measure savings.
 
-**Target**: 15-25% context recovery (autocompact ON) or 30-45% (autocompact OFF), plus 40-60% cost reduction through behavioral optimization. Results vary by setup (heavier setups save more).
+**Target**: 5-15% context recovery through config cleanup (more for heavier setups), up to 25%+ with autocompact management. Plus behavioral optimizations that compound across every session.
 
 ---
 
