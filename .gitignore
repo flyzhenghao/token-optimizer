@@ -9,3 +9,5 @@ build/
 .venv/
 venv/
 snapshots/
+.pytest_cache/
+FIELD_NOTES.md

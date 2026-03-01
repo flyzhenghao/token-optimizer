@@ -1429,18 +1429,28 @@ var DB = (function() {
   function buildPrompt() {
     var sel = items.filter(function(it) { return it.checked && it.section !== 'habits'; });
     if (!sel.length) return '';
-    var out = ["I've reviewed my Token Optimizer audit. Please implement these optimizations:", ''];
+    var out = [
+      "I've reviewed my Token Optimizer dashboard and selected these optimizations to implement.",
+      "For each item, I've included the full context from the audit so you have everything you need.",
+      '',
+      'IMPORTANT: Back up all files to ~/.claude/_backups/ before making any changes.',
+      'Show me a diff for each change before applying it. Ask before deleting anything.',
+      ''
+    ];
     sel.forEach(function(it, i) {
-      var tag = it.group === 'Quick Wins' ? 'Quick Win' : it.group === 'Medium Effort' ? 'Medium' : it.group === 'Deep' ? 'Deep' : 'Behavioral';
-      var line = (i+1) + '. [' + tag + '] ' + it.title;
-      if (it.tokens) line += ' (~' + fn(it.tokens) + ' tokens)';
-      out.push(line);
+      var tag = it.group === 'Quick Wins' ? 'QUICK WIN' : it.group === 'Medium Effort' ? 'MEDIUM' : 'DEEP';
+      out.push('---');
+      out.push((i+1) + '. [' + tag + '] ' + it.title + (it.tokens ? ' (~' + fn(it.tokens) + ' tokens)' : ''));
+      if (it.fullDesc) {
+        out.push('');
+        out.push(it.fullDesc);
+      }
+      out.push('');
     });
     var notes = document.getElementById('notes-input').value.trim();
-    if (notes) { out.push(''); out.push('Notes from my review:'); out.push(notes); }
+    if (notes) { out.push('MY NOTES:'); out.push(notes); out.push(''); }
     var tot = sel.reduce(function(s, it) { return s + it.tokens; }, 0);
-    if (tot) { out.push(''); out.push('Estimated savings: ~' + fn(tot) + ' tokens/session'); }
-    out.push(''); out.push('Show diffs before changes. Back up to ~/.claude/_backups/ first.');
+    if (tot) { out.push('Total estimated savings: ~' + fn(tot) + ' tokens/session'); }
     return out.join('\n');
   }
 
@@ -1574,9 +1584,9 @@ function getSampleData() {
         claude_md_global: { tokens: 1210, lines: 106, exists: true },
         claude_md_home: { tokens: 15, lines: 1, exists: true },
         memory_md: { tokens: 2775, lines: 185, exists: true },
-        skills: { count: 56, tokens: 3500, names: [] },
-        commands: { count: 59, tokens: 2950, names: [] },
-        mcp_tools: { server_count: 13, tool_count_estimate: 104, tokens: 1560 },
+        skills: { count: 42, tokens: 3500, names: [] },
+        commands: { count: 38, tokens: 2950, names: [] },
+        mcp_tools: { server_count: 8, tool_count_estimate: 72, tokens: 1560 },
         rules: { count: 2, tokens: 200 },
         imports: { count: 0, tokens: 0 },
         claude_local_md: { tokens: 0, exists: false },
@@ -1589,93 +1599,93 @@ function getSampleData() {
       },
       component_details: {
         claude_md: {
-          what: 'Your CLAUDE.md files are loaded at the start of every session. They contain personality rules, key paths, workflow instructions, and quality gates that shape every Claude response.',
+          what: 'Your CLAUDE.md files are loaded at the start of every session. They contain identity rules, key paths, workflow instructions, and quality gates that shape every Claude response.',
           top: [
             { name: 'Global CLAUDE.md', note: '~1,210 tokens' },
             { name: 'Home CLAUDE.md', note: '~15 tokens' }
           ],
           issues: [
-            'Multi-Agent Coordination section is verbose',
-            'qmd section duplicates CLAUDE.md content'
+            'Deployment instructions section is 12 lines (should be a reference file)',
+            'Testing conventions duplicate content from rules/'
           ],
           related: [
-            { title: 'Condense Multi-Agent Coordination', section: 'quick' },
-            { title: 'Remove duplicate qmd section', section: 'quick' },
+            { title: 'Move deployment docs to reference file', section: 'quick' },
+            { title: 'Remove duplicate testing conventions', section: 'quick' },
             { title: 'Split CLAUDE.md into modular imports', section: 'deep' }
           ]
         },
         memory_md: {
           what: 'Auto-memory file loaded into every conversation context. Contains accumulated patterns, decisions, and system notes. Lines after 200 are truncated but still counted.',
           top: [
-            { name: 'Competitive Landscape', note: '~150 tokens, stale' },
-            { name: 'Vercel Deployment', note: '~140 tokens' },
-            { name: 'WhatsApp Bridge', note: '~130 tokens' },
-            { name: 'Total Recall v4', note: '~120 tokens' },
-            { name: 'Skill Packaging', note: '~100 tokens' }
+            { name: 'API Integration Notes', note: '~150 tokens, stale' },
+            { name: 'Deployment Architecture', note: '~140 tokens' },
+            { name: 'Database Migration Log', note: '~130 tokens' },
+            { name: 'Feature Flag System', note: '~120 tokens' },
+            { name: 'Error Handling Patterns', note: '~100 tokens' }
           ],
           issues: [
-            'Competitive landscape section has stale data',
+            'API integration notes reference deprecated endpoints',
             '5 sections could be condensed by 50%+',
             'Some notes are one-time fixes already applied'
           ],
           related: [
-            { title: 'Delete competitive landscape', section: 'quick' },
+            { title: 'Delete stale API integration notes', section: 'quick' },
             { title: 'Condense 5 verbose sections', section: 'medium' },
             { title: 'Restructure as index', section: 'deep' }
           ]
         },
         skills: {
-          sub: '56 user skills + 99 plugin skills',
+          sub: '42 user skills + 72 plugin skills',
           what: "Every skill's SKILL.md frontmatter (name + description) is loaded into the tool menu at session start. The description length directly controls token cost.",
           top: [
-            { name: 'icp-persona-builder', note: '39,962 bytes' },
-            { name: 'api-documentation', note: '30,175 bytes' },
-            { name: 'morning', note: '27,809 bytes' },
-            { name: 'evening', note: '22,025 bytes' },
-            { name: 'writing-skills', note: '20,819 bytes' }
+            { name: 'full-stack-debugger', note: '35,210 bytes' },
+            { name: 'api-documentation', note: '28,400 bytes' },
+            { name: 'code-reviewer', note: '24,100 bytes' },
+            { name: 'deploy-pipeline', note: '21,800 bytes' },
+            { name: 'test-generator', note: '19,500 bytes' }
           ],
           issues: [
-            '48 of 56 have descriptions over 200 chars',
-            '2 broken symlinks (wiggle, UX-Design-Master)',
+            '35 of 42 have descriptions over 200 chars',
+            '2 broken symlinks (old-debugger, legacy-formatter)',
             '1 plugin duplicate (frontend-design)',
-            'compound-engineering: 12+ Ruby/Rails skills unused'
+            'Plugin includes 10+ language-specific skills you never use'
           ],
           related: [
             { title: 'Trim top-10 skill descriptions', section: 'medium' },
             { title: 'Remove broken symlinks', section: 'quick' },
-            { title: 'Remove irrelevant CE skills', section: 'deep' }
+            { title: 'Remove irrelevant plugin skills', section: 'deep' }
           ]
         },
         commands: {
           what: "Each command's COMMAND.md file is parsed and registered at startup. Commands with long descriptions consume tokens even if rarely used. Command suites share a namespace.",
           top: [
-            { name: 'gsd:* suite', note: '25 commands, ~1,200 tokens' },
-            { name: 'compound-engineering:*', note: '15 commands, ~800 tokens' },
-            { name: 'User commands', note: '19 commands, ~950 tokens' }
+            { name: 'Plugin suite A', note: '18 commands, ~1,200 tokens' },
+            { name: 'Plugin suite B', note: '12 commands, ~800 tokens' },
+            { name: 'User commands', note: '8 commands, ~950 tokens' }
           ],
           issues: [
-            'gsd + CE commands may be unused overhead',
+            'Plugin commands may be unused overhead',
             '3 pairs of overlapping commands identified',
-            'sync-email and sync-calendars could merge'
+            'Two similar deploy commands could merge'
           ],
           related: [
-            { title: 'Assess gsd bundle usage', section: 'medium' },
+            { title: 'Assess plugin bundle usage', section: 'medium' },
             { title: 'Merge overlapping commands', section: 'deep' },
-            { title: 'Consolidate sync commands', section: 'medium' }
+            { title: 'Consolidate deploy commands', section: 'medium' }
           ]
         },
         mcp_tools: {
           what: "MCP server tool definitions are loaded when servers connect. Each tool's name, description, and parameter schema contribute to token cost. Duplicate servers double the cost.",
           top: [
-            { name: 'context7 (x2)', note: '~300 tokens (duplicated)' },
-            { name: 'BrightData (x2)', note: '~200 tokens (duplicated)' },
-            { name: 'memory + memory-semantic', note: '~400 tokens' },
-            { name: 'whatsapp', note: '~150 tokens' }
+            { name: 'docs-server (x2)', note: '~300 tokens (duplicated)' },
+            { name: 'search-server (x2)', note: '~200 tokens (duplicated)' },
+            { name: 'memory servers', note: '~400 tokens' },
+            { name: 'browser-automation', note: '~150 tokens' }
           ],
           issues: [
-            'context7 registered twice (plugin + standalone)',
-            'BrightData registered twice',
-            '13 servers total, some rarely used'
+            'Docs server registered twice (plugin + standalone)',
+            'Search server registered twice',
+            '8 servers total, 2 rarely used'
           ],
           related: [
             { title: 'Merge duplicate MCP servers', section: 'medium' }
@@ -1693,50 +1703,50 @@ function getSampleData() {
     },
     audit: {},
     plan: '## Quick Wins\n\n' +
-      '- [ ] **Delete competitive landscape from MEMORY.md**: Star counts, SaaS pricing tiers, Browse App concept, monetization plan.\n' +
-      '  Pure strategy notes with stale numbers. Zero effect on Claude behavior. Loaded every single session for no reason.\n' +
-      '  The data lives in semantic memory and in /tmp/total-recall-competitive/. Recoverable anytime.\n' +
-      '  Delete the "Total Recall Competitive Landscape" section from MEMORY.md. ~150 tokens freed per session.\n\n' +
-      '- [ ] **Remove broken symlinks**: wiggle and UX-Design-Master skill directories are broken symlinks pointing to deleted targets.\n' +
+      '- [ ] **Delete stale API integration notes from MEMORY.md**: References to deprecated v1 endpoints, old rate limits, and sunset dates.\n' +
+      '  Pure historical context with no effect on current behavior. Loaded every single session for no reason.\n' +
+      '  The relevant current API docs are in the project README. Recoverable from git history anytime.\n' +
+      '  Delete the "API Integration Notes" section from MEMORY.md. ~150 tokens freed per session.\n\n' +
+      '- [ ] **Remove broken symlinks**: old-debugger and legacy-formatter skill directories are broken symlinks pointing to deleted targets.\n' +
       '  Claude Code tries to parse these at session start, generates warnings, and wastes time.\n' +
       '  No trade-offs, these skills no longer exist. Just delete the dangling symlinks. ~100 tokens.\n\n' +
-      '- [ ] **Condense Multi-Agent Coordination**: The current section is 8 lines with detailed folder structure rules.\n' +
-      '  Reduce to a 2-line pointer: "Create coordination folder for 2+ agents. See SYSTEM/references/ for structure."\n' +
-      '  Full spec moves to a reference file. ~50 tokens/session.\n\n' +
-      '- [ ] **Remove duplicate qmd section**: The qmd integration pattern note in MEMORY.md just says "see CLAUDE.md".\n' +
-      '  It adds nothing. The authoritative qmd spec is already in CLAUDE.md. Remove the pointer entirely. ~40 tokens.\n\n' +
-      '- [ ] **Delete stale automation timeouts**: The 900s timeout fix was applied months ago.\n' +
-      '  This note was useful during debugging but is now pure historical context. Safe to remove. ~35 tokens.\n\n' +
-      '- [ ] **Trim email freshness note**: Currently 4 sentences explaining input_email.md size.\n' +
-      '  Reduce to: "Use priority_inbox.md for email freshness. Use tail -2000 on input_email.md for recent." ~25 tokens.\n\n' +
-      '- [ ] **Remove PEP 668 note from /img**: The --break-system-packages flag was a one-time Python 3.14 fix.\n' +
-      '  Already applied. No reason to remind Claude about it every session. ~20 tokens.\n\n' +
+      '- [ ] **Move deployment docs to reference file**: The deployment instructions section in CLAUDE.md is 12 lines.\n' +
+      '  Move to a references/deployment.md file. Add a 1-line pointer in CLAUDE.md: "See references/deployment.md".\n' +
+      '  Full docs load only when you ask about deployment instead of every session. ~50 tokens/session.\n\n' +
+      '- [ ] **Remove duplicate testing conventions**: Testing rules in CLAUDE.md are also defined in .claude/rules/testing.md.\n' +
+      '  The rules/ version is more complete. Remove the duplicate from CLAUDE.md. ~40 tokens.\n\n' +
+      '- [ ] **Delete stale migration log**: The database migration log from 3 months ago is still in MEMORY.md.\n' +
+      '  All migrations were applied successfully. This was useful during the migration but is now dead weight. ~35 tokens.\n\n' +
+      '- [ ] **Trim error handling note**: Currently 4 sentences explaining the retry strategy.\n' +
+      '  Reduce to: "Retry 3x with exponential backoff. See references/error-handling.md for full spec." ~25 tokens.\n\n' +
+      '- [ ] **Remove one-time setup note**: The Node.js version pinning note was a one-time fix.\n' +
+      '  Already applied to .nvmrc. No reason to remind Claude about it every session. ~20 tokens.\n\n' +
       '## Medium Effort\n\n' +
-      '- [ ] **Condense 5 verbose MEMORY.md sections**: WhatsApp Bridge, Self-Improving Hooks, Context-Memory Sync, Total Recall, and Vercel Deployment.\n' +
+      '- [ ] **Condense 5 verbose MEMORY.md sections**: Deployment Architecture, Database Migration Log, Feature Flags, Error Handling, and CI Pipeline.\n' +
       '  Each section carries implementation details that only matter during active development.\n' +
       '  Condense each to 2-3 essential lines. Move details to topic-specific memory files.\n' +
       '  Total savings: ~825 tokens/session.\n\n' +
-      '- [ ] **Trim top-10 skill descriptions**: 48 of 56 user skills have descriptions exceeding 200 characters.\n' +
+      '- [ ] **Trim top-10 skill descriptions**: 35 of 42 user skills have descriptions exceeding 200 characters.\n' +
       '  The top 10 by byte size account for most of the waste. Shorter descriptions reduce tool menu token cost.\n' +
       '  Review each skill and trim to under 120 characters. ~1,050 tokens/session.\n\n' +
-      '- [ ] **Assess gsd bundle usage**: The GSD plugin contributes 30 skills and 25 commands totaling ~2,750 tokens.\n' +
-      '  If unused in daily workflow, disabling the plugin saves significant overhead.\n' +
+      '- [ ] **Assess plugin bundle usage**: Plugin suite A contributes 18 commands totaling ~1,200 tokens.\n' +
+      '  If unused in your daily workflow, disabling the plugin saves significant overhead.\n' +
       '  Run usage analysis first. If active, keep. If dormant, disable entirely.\n\n' +
-      '- [ ] **Merge duplicate MCP servers**: context7 is registered twice (plugin + standalone). BrightData is also duplicated.\n' +
+      '- [ ] **Merge duplicate MCP servers**: Docs server is registered twice (plugin + standalone). Search server is also duplicated.\n' +
       '  Each duplicate loads the same tool definitions twice, doubling token cost for zero benefit.\n' +
       '  Remove the standalone instances, keep plugin versions. ~375 tokens.\n\n' +
       '- [ ] **Shorten skill frontmatter**: 12 skills have verbose multi-sentence descriptions in SKILL.md frontmatter.\n' +
       '  The frontmatter description is loaded into the tool menu for every session.\n' +
       '  Trim to single-sentence descriptions under 80 characters each. ~480 tokens.\n\n' +
-      '- [ ] **Consolidate sync commands**: sync-email and sync-calendars are separate commands that could be one.\n' +
-      '  They share similar structure and are often run together. Merge into a single sync command with subcommands. ~150 tokens.\n\n' +
-      '- [ ] **Archive old Vercel projects**: 3 inactive v0 projects (58+ days dormant) still contribute to config overhead.\n' +
-      '  Archive or delete from Vercel dashboard. Clean up deploy references in MEMORY.md. ~200 tokens.\n\n' +
+      '- [ ] **Consolidate deploy commands**: deploy-staging and deploy-production are separate commands with 90% identical logic.\n' +
+      '  They share similar structure and differ only in the target environment. Merge into a single deploy command with an env flag. ~150 tokens.\n\n' +
+      '- [ ] **Archive stale project references**: 3 old project configs in MEMORY.md that are no longer active.\n' +
+      '  They reference deprecated services and infrastructure. Clean up references. ~200 tokens.\n\n' +
       '- [ ] **Compress hook system docs**: The hook system reference in MEMORY.md has full implementation details.\n' +
-      '  Reduce to hook names and one-line purposes. Full docs stay in SYSTEM/references/hooks-system.md. ~120 tokens.\n\n' +
+      '  Reduce to hook names and one-line purposes. Full docs stay in a reference file. ~120 tokens.\n\n' +
       '## Deep Optimization\n\n' +
-      '- [ ] **Remove irrelevant compound-engineering skills**: 12-15 Ruby, Rails, and iOS review skills from the CE plugin.\n' +
-      '  These are for Ruby/Rails codebases. Your stack is Python, TypeScript, and shell scripts.\n' +
+      '- [ ] **Remove irrelevant plugin skills**: 10-15 language-specific review skills from a plugin.\n' +
+      '  These are for languages not in your stack (Ruby, Go, Swift).\n' +
       '  Each loads its SKILL.md frontmatter into the tool menu. Remove via plugin configuration. ~600 tokens/session.\n\n' +
       '- [ ] **Merge overlapping commands**: 3 pairs of commands with similar functionality identified.\n' +
       '  Redundant commands increase the tool menu size and create confusion about which to use.\n' +
@@ -1747,8 +1757,8 @@ function getSampleData() {
       '- [ ] **Create .claudeignore for large files**: settings.local.json is 85KB and gets indexed by Claude Code.\n' +
       '  Add it to .claudeignore along with other large non-code files.\n' +
       '  Reduces file indexing overhead without affecting functionality. ~300 tokens.\n\n' +
-      '- [ ] **Split CLAUDE.md into modular imports**: Separate personality, paths, rules, and gotchas into importable modules.\n' +
-      '  Only the core module loads every session. Others load on demand via imports.\n' +
+      '- [ ] **Split CLAUDE.md into modular imports**: Separate identity, paths, rules, and project-specific sections into importable modules.\n' +
+      '  Only the core module loads every session. Others load on demand via @imports.\n' +
       '  Requires careful testing of import resolution. ~400 tokens.\n\n' +
       '- [ ] **Implement tiered skill loading**: Load only skill names at startup, full descriptions on demand.\n' +
       '  Requires changes to how skills are registered in the tool menu.\n' +
@@ -1772,9 +1782,9 @@ function getSampleData() {
       '- [ ] **Review before /remember**: Speculative saves bloat semantic memory with unverified information.\n' +
       '  Verify insights against project docs before committing to memory.\n' +
       '  Prevents memory pollution and keeps search results relevant.\n\n' +
-      '- [ ] **Use qmd before Glob**: qmd hybrid search is indexed and faster than recursive Glob for file discovery.\n' +
-      '  Less tool output in context means more room for actual work.\n' +
-      '  Already configured, just needs consistent usage.\n',
+      '- [ ] **Check /context before long tasks**: Knowing your fill level before a complex task helps you decide whether to /compact first.\n' +
+      '  Prevents mid-task compaction that loses important context.\n' +
+      '  Takes 2 seconds. Saves the 5-minute recovery from an unexpected compaction.\n',
     generated_at: new Date().toISOString()
   };
 }
