@@ -49,7 +49,7 @@ Your 200K context window gets eaten from multiple directions:
 
 **Your config stack** (what this tool optimizes): CLAUDE.md that's grown organically. MEMORY.md that duplicates half of it. 50+ skills you installed and forgot. Commands you never use. [`@imports`](https://code.claude.com/docs/en/memory) pulling in files you didn't realize. [`.claude/rules/`](https://code.claude.com/docs/en/memory) adding up quietly. No `.claudeignore` to block system reminder injection.
 
-A real power user's session baseline: **~43,000 tokens consumed per message** (22% of the 200K window). Add the autocompact buffer and **~38% is unavailable** before typing a single word.
+A real power user's baseline overhead: **~43,000 tokens** (22% of the 200K window). Add the autocompact buffer and **~38% is unavailable** before you type a single word.
 
 Every subagent you spawn gets its own 200K window and loads the same full stack. Five parallel agents means five copies of that overhead, each starting ~30% full before doing any work.
 
