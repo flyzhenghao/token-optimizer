@@ -235,7 +235,7 @@ Generate and add a compact instructions section to CLAUDE.md.
 - [ ] Results quantified (tokens + cost)
 - [ ] Hooks configuration offered (PreCompact, PostToolUse)
 - [ ] CLAUDE.md cache structure checked (static first, volatile last)
-- [ ] Token monitoring tools recommended (ccusage, /context)
+- [ ] Token monitoring tools recommended (measure.py trends + SessionEnd hook, /context, /cost)
 
 ---
 

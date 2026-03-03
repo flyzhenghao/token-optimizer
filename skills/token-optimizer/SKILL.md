@@ -163,12 +163,12 @@ What should we tackle first?
 **Then generate the interactive dashboard:**
 
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py dashboard --coord-path $COORD_PATH
+python3 ~/.claude/skills/token-optimizer/scripts/measure.py dashboard --coord-path $COORD_PATH --serve
 ```
 
-This opens an HTML dashboard in the browser with all findings, a token donut chart, and an optimization checklist. The user can browse categories, toggle optimizations, and click "Copy Prompt" to paste selected items back into Claude Code.
+This serves an interactive HTML dashboard at `http://localhost:8080/dashboard.html` with all findings, a token donut chart, and an optimization checklist. The user can browse categories, toggle optimizations, and click "Copy Prompt" to paste selected items back into Claude Code.
 
-Tell the user: "Dashboard opened in your browser. Browse findings by category, check the optimizations you want, click Copy Prompt and paste back here. Or just tell me directly what to tackle."
+Tell the user: "Dashboard running at http://localhost:8080/dashboard.html. Browse findings by category, check the optimizations you want, click Copy Prompt and paste back here. Or just tell me directly what to tackle."
 
 The terminal summary above remains for headless/terminal-only environments. Dashboard is additive.
 
@@ -219,7 +219,7 @@ NEXT STEPS (Behavioral)
 4. Use Plan Mode (Shift+Tab x2) before complex tasks
 5. Batch related requests into one message
 6. Run /context periodically to check fill level
-7. Install ccusage for tracking: npx ccusage@latest daily
+7. Run `measure.py trends` periodically to review usage patterns
 ```
 
 ---

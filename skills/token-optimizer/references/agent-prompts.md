@@ -330,7 +330,7 @@ Output file: {COORD_PATH}/audit/advanced.md
    - If missing: flag as HIGH PRIORITY
 
 4. Token monitoring:
-   - Check if ccusage is installed: which ccusage
+   - Check if SessionEnd hook is installed for `measure.py collect` (the skill's own analytics)
    - Check for OTLP telemetry config
    - Check if /context command awareness exists in CLAUDE.md
 
@@ -400,7 +400,7 @@ Output file: {COORD_PATH}/audit/advanced.md
    **Coverage**: [Good / Needs expansion]
 
    ## Token Monitoring
-   **ccusage installed**: [Yes / No]
+   **SessionEnd hook installed** (measure.py collect): [Yes / No]
    **Telemetry**: [Enabled / Not configured]
 
    ## Plan Mode

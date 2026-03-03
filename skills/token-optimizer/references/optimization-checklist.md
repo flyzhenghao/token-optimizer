@@ -359,7 +359,7 @@ python3 ~/.claude/skills/token-optimizer/scripts/measure.py snapshot after
 python3 ~/.claude/skills/token-optimizer/scripts/measure.py compare
 ```
 
-Also track with `/cost` at end of each session and `npx ccusage@latest daily` for historical data.
+Also track with `/cost` at end of each session and `measure.py trends` for historical data. The SessionEnd hook auto-collects usage into a local SQLite database.
 
 ---
 
