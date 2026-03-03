@@ -2309,7 +2309,7 @@ def _find_session_version_for_pid(pid):
     # Only return if we found a reasonable match (within 5 minutes of start)
     if best_match and best_diff < 300:
         return best_match
-    return best_match  # Return best guess even if not close
+    return None  # No confident match; don't guess (causes false OUTDATED flags)
 
 
 def _collect_health_data():
