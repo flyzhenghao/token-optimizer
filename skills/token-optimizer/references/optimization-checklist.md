@@ -408,16 +408,16 @@ See `examples/hooks-starter.json` for a ready-to-use template.
 
 ```bash
 # Measure current state
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py report
+python3 $MEASURE_PY report
 
 # Save snapshot before optimizing
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py snapshot before
+python3 $MEASURE_PY snapshot before
 
 # After optimization
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py snapshot after
+python3 $MEASURE_PY snapshot after
 
 # Compare
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py compare
+python3 $MEASURE_PY compare
 ```
 
 Also track with `/cost` at end of each session and `measure.py trends` for historical data. The SessionEnd hook auto-collects usage into a local SQLite database.

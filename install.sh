@@ -68,6 +68,26 @@ if [ ! -d "${HOME}/.claude" ]; then
 fi
 info "~/.claude/ OK"
 
+# ── Plugin Conflict Check ────────────────────────────────────
+
+if [ -d "${HOME}/.claude/plugins/cache" ]; then
+    if find "${HOME}/.claude/plugins/cache" -name "plugin.json" -exec grep -l '"name"[[:space:]]*:[[:space:]]*"token-optimizer"' {} \; 2>/dev/null | head -1 | grep -q .; then
+        warn "Token Optimizer is already installed as a Claude Code plugin."
+        warn "The script installer creates a skill symlink, which would duplicate the plugin."
+        warn "If you want the script version instead, first uninstall the plugin:"
+        warn "  /plugin uninstall token-optimizer@alexgreensh-token-optimizer"
+        echo ""
+        if [ -t 0 ] || [ -e /dev/tty ]; then
+            printf "Continue anyway? (y/N) "
+            read -r confirm < /dev/tty
+            [ "$confirm" = "y" ] || [ "$confirm" = "Y" ] || exit 0
+        else
+            warn "Non-interactive mode detected. Skipping (use plugin install instead)."
+            exit 0
+        fi
+    fi
+fi
+
 # ── Clone or Update ───────────────────────────────────────────
 
 clone_repo() {
@@ -110,20 +130,16 @@ fi
 mkdir -p "$SKILL_DIR"
 SKILL_LINK="${SKILL_DIR}/token-optimizer"
 
-if [ -L "$SKILL_LINK" ]; then
-    OLD_TARGET=$(readlink "$SKILL_LINK" 2>/dev/null || echo "unknown")
-    info "Replacing existing symlink: ${SKILL_LINK} -> ${OLD_TARGET}"
-    rm "$SKILL_LINK"
-elif [ -f "$SKILL_LINK" ]; then
-    warn "Regular file exists at ${SKILL_LINK}. Moving to ${SKILL_LINK}.bak"
-    mv "$SKILL_LINK" "${SKILL_LINK}.bak"
-fi
-
 if [ -d "$SKILL_LINK" ] && [ ! -L "$SKILL_LINK" ]; then
     warn "/token-optimizer skill directory exists (not a symlink). Skipping."
     warn "To use the repo version, move it: mv ${SKILL_LINK} ${SKILL_LINK}.local"
+elif [ -f "$SKILL_LINK" ] && [ ! -L "$SKILL_LINK" ]; then
+    warn "Regular file exists at ${SKILL_LINK}. Moving to ${SKILL_LINK}.bak"
+    mv "$SKILL_LINK" "${SKILL_LINK}.bak"
+    ln -sf "${INSTALL_DIR}/skills/token-optimizer" "$SKILL_LINK"
+    info "Linked /token-optimizer skill"
 else
-    ln -s "${INSTALL_DIR}/skills/token-optimizer" "$SKILL_LINK"
+    ln -sf "${INSTALL_DIR}/skills/token-optimizer" "$SKILL_LINK"
     info "Linked /token-optimizer skill"
 fi
 

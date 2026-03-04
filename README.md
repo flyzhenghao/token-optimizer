@@ -8,24 +8,55 @@
 
 ## Install
 
+### Plugin (recommended)
+
+In Claude Code:
+
+```
+/plugin marketplace add alexgreensh/token-optimizer
+/plugin install token-optimizer@alexgreensh-token-optimizer
+```
+
+Auto-updates when you restart Claude Code. Requires Claude Code 1.0.33+.
+
+### Script installer
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alexgreensh/token-optimizer/main/install.sh | bash
 ```
+
+Updates: `cd ~/.claude/token-optimizer && git pull`.
+
+### Manual
+
+```bash
+git clone https://github.com/alexgreensh/token-optimizer.git ~/.claude/token-optimizer
+ln -sf ~/.claude/token-optimizer/skills/token-optimizer ~/.claude/skills/token-optimizer
+```
+
+### Migrating from script to plugin
+
+If you installed via the script and want to switch to the plugin (for auto-updates):
+
+```bash
+# Remove skill (handles both symlink and directory)
+if [ -L ~/.claude/skills/token-optimizer ]; then
+  rm -f ~/.claude/skills/token-optimizer
+else
+  rm -rf ~/.claude/skills/token-optimizer
+fi
+rm -rf ~/.claude/token-optimizer            # remove clone (optional)
+```
+
+Then install the plugin using the commands above.
+
+---
 
 Then start Claude Code and run:
 
 ```
 /token-optimizer
 ```
-
-Or manually:
-
-```bash
-git clone https://github.com/alexgreensh/token-optimizer.git ~/.claude/token-optimizer
-ln -s ~/.claude/token-optimizer/skills/token-optimizer ~/.claude/skills/token-optimizer
-```
-
-Updates: `cd ~/.claude/token-optimizer && git pull`. The installer uses a symlink, so the skill always loads from the repo.
 
 ## The Problem
 
@@ -134,14 +165,31 @@ After the audit, you get an interactive HTML dashboard that breaks down exactly 
 
 Every component is clickable. Expand any item to see why it matters, what the trade-offs are, and what changes. Toggle the fixes you want, and copy a ready-to-paste optimization prompt.
 
-**Headless / remote server**: If you're running without a GUI, serve the dashboard over HTTP:
+### Persistent Dashboard
+
+The dashboard auto-regenerates after every session (via the SessionEnd hook). It shows Trends and Health tabs with your latest usage data. The full audit dashboard (with optimization recommendations) requires running `/token-optimizer`.
+
+**Access it:**
 
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py dashboard --coord-path PATH --serve
-# Dashboard available at http://your-server-ip:8080/dashboard.html
+# Serve over HTTP (works on headless machines, remote servers, anything with a network)
+python3 $MEASURE_PY dashboard --serve
+# => http://localhost:8080/dashboard.html
 
-# Custom port:
-python3 measure.py dashboard --coord-path PATH --serve --port 9000
+# Custom port
+python3 $MEASURE_PY dashboard --serve --port 9000
+
+# Remote access: SSH tunnel from your laptop
+ssh -L 8080:localhost:8080 your-server
+# Then open http://localhost:8080/dashboard.html locally
+```
+
+The file also lives at `~/.claude/_backups/token-optimizer/dashboard.html` if you have a local GUI. To regenerate manually: `python3 $MEASURE_PY dashboard`.
+
+**Full audit dashboard** (after running `/token-optimizer`):
+
+```bash
+python3 $MEASURE_PY dashboard --coord-path PATH --serve
 ```
 
 ## How It Works
@@ -171,25 +219,44 @@ Prompt caching cuts cost by 90%. But it doesn't shrink your context window.
 
 Standalone script. No dependencies. Python 3.8+.
 
+The path depends on how you installed. Set it once:
+
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py report
+# Auto-detect (works for both plugin and script/manual installs):
+if [ -f ~/.claude/skills/token-optimizer/scripts/measure.py ]; then
+  MEASURE_PY=~/.claude/skills/token-optimizer/scripts/measure.py
+else
+  MEASURE_PY=$(find ~/.claude/plugins/cache -path "*/token-optimizer/scripts/measure.py" 2>/dev/null | head -1)
+fi
+[ -z "$MEASURE_PY" ] || [ ! -f "$MEASURE_PY" ] && { echo "measure.py not found. Is Token Optimizer installed?"; exit 1; }
+```
+
+```bash
+python3 $MEASURE_PY report
 
 # Save snapshots for before/after comparison
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py snapshot before
+python3 $MEASURE_PY snapshot before
 # ... make changes ...
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py snapshot after
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py compare
+python3 $MEASURE_PY snapshot after
+python3 $MEASURE_PY compare
 ```
 
 ## Usage Analytics
 
 The optimizer doesn't just audit your config once. It tracks how you actually use Claude Code over time, so you can spot patterns, catch waste, and make informed decisions about what to keep and what to archive.
 
-Two commands power this: `trends` for usage patterns and `health` for session hygiene. Both work from the CLI and appear as interactive tabs in the dashboard.
+Two commands power this: `trends` for usage patterns and `health` for session hygiene. Both work from the CLI and appear as interactive tabs in the persistent dashboard (auto-refreshed after every session) and in the full audit dashboard.
 
 ### Automatic Collection
 
-Add a one-line SessionEnd hook and usage data collects itself:
+Add a SessionEnd hook and usage data collects itself. The setup command auto-detects measure.py's path regardless of install method:
+
+```bash
+python3 $MEASURE_PY setup-hook --dry-run   # preview the change
+python3 $MEASURE_PY setup-hook             # install it
+```
+
+Or add manually to `~/.claude/settings.json` (adjust the path to match your install):
 
 ```json
 {
@@ -197,23 +264,23 @@ Add a one-line SessionEnd hook and usage data collects itself:
     "SessionEnd": [{
       "hooks": [{
         "type": "command",
-        "command": "python3 ~/.claude/skills/token-optimizer/scripts/measure.py collect --quiet"
+        "command": "python3 /path/to/measure.py collect --quiet && python3 /path/to/measure.py dashboard --quiet"
       }]
     }]
   }
 }
 ```
 
-Every session end parses the JSONL log into a local SQLite database (`~/.claude/_backups/token-optimizer/trends.db`). No external services. No API calls. Your data stays on your machine.
+Every session end: collects the JSONL log into a local SQLite database (`~/.claude/_backups/token-optimizer/trends.db`), then regenerates the persistent dashboard. No external services. No API calls. Your data stays on your machine.
 
 You can also collect manually or backfill older sessions:
 
 ```bash
 # Collect last 90 days of sessions (default)
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py collect
+python3 $MEASURE_PY collect
 
 # Backfill a longer history
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py collect --days 180
+python3 $MEASURE_PY collect --days 180
 ```
 
 Collection is idempotent. Running it twice on the same sessions won't double-count anything.
@@ -221,9 +288,9 @@ Collection is idempotent. Running it twice on the same sessions won't double-cou
 ### Usage Trends
 
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py trends
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py trends --days 7
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py trends --json
+python3 $MEASURE_PY trends
+python3 $MEASURE_PY trends --days 7
+python3 $MEASURE_PY trends --json
 ```
 
 Scans your session history and shows:
@@ -267,7 +334,7 @@ Never-used skills link directly to the Quick Wins tab so you can archive them in
 ### Session Health
 
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py health
+python3 $MEASURE_PY health
 ```
 
 Detects running Claude Code processes and flags problems:
@@ -292,14 +359,14 @@ RECOMMENDATIONS
 
 ### Dashboard Analytics Tabs
 
-When you generate the dashboard (`measure.py dashboard --coord-path PATH`), trends and health appear as dedicated tabs alongside the optimization findings. The Trends tab includes:
+Trends and health appear as dedicated tabs in both the persistent dashboard (`measure.py dashboard`) and the full audit dashboard (`measure.py dashboard --coord-path PATH`). The Trends tab includes:
 
 - Date range selector (7/14/30 days + calendar date picker)
 - Interactive daily breakdown table (click a day to expand individual sessions)
 - Skills usage bars with clickable detail panels
 - Model mix visualization with cost-saving context
 
-The right panel collapses on analytics tabs since they're informational, giving the data more room.
+The persistent dashboard defaults to the Trends tab and hides empty audit sections. The full audit dashboard shows all tabs. The right panel collapses on analytics tabs since they're informational, giving the data more room.
 
 ## vs Alternatives
 
@@ -317,6 +384,7 @@ skills/token-optimizer/
   SKILL.md                             Orchestrator
   assets/
     dashboard.html                     Interactive dashboard (optimization + analytics)
+    dashboard-overview.png             Dashboard screenshot
     logo.svg                           Animated ASCII logo
     hero-terminal.svg                  Terminal demo
     before-after.svg                   Token breakdown comparison
@@ -324,7 +392,7 @@ skills/token-optimizer/
     user-profiles.svg                  Context usage by setup type
   references/
     agent-prompts.md                   8 agent prompt templates
-    implementation-playbook.md         Fix implementation details (4A-4K)
+    implementation-playbook.md         Fix implementation details (4A-4L)
     optimization-checklist.md          30 optimization techniques
     token-flow-architecture.md         How Claude Code loads tokens
   examples/

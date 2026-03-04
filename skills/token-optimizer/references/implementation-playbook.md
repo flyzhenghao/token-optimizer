@@ -32,8 +32,12 @@ cp ~/.claude/CLAUDE.md ~/.claude/_backups/CLAUDE.md.pre-optimization-$(date +%Y%
 ## 4B: MEMORY.md Deduplication
 
 ```bash
-# Backup first
-cp ~/.claude/projects/-Users-*/memory/MEMORY.md ~/.claude/_backups/MEMORY.md.pre-optimization-$(date +%Y%m%d)
+# Backup first (handles multiple projects)
+for memfile in ~/.claude/projects/*/memory/MEMORY.md; do
+  [ -f "$memfile" ] || continue
+  projname=$(basename "$(dirname "$(dirname "$memfile")")")
+  cp "$memfile" "$HOME/.claude/_backups/MEMORY-${projname}.pre-optimization-$(date +%Y%m%d).md"
+done
 ```
 
 **Steps**:
@@ -81,7 +85,7 @@ To disable these MCP servers:
 
 1. Edit config file:
    - Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
-   - Claude Code: ~/.config/claude/user_config.json
+   - Claude Code: ~/.claude/settings.json
 
 2. Remove or comment out these entries:
    - [server1]: [reason]
@@ -101,7 +105,7 @@ Estimated savings: ~X tokens
 Handled in Phase 0 setup. If the user skipped it there, offer again here:
 
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py check-hook
+python3 $MEASURE_PY check-hook
 ```
 
 If not installed, run `setup-hook --dry-run` to show the proposed change, then `setup-hook` after confirmation. The hook runs `measure.py collect --quiet` once per session close (~1 second, zero background processes).
@@ -240,7 +244,7 @@ Add or improve model routing instructions in CLAUDE.md.
    - opus: architecture decisions, novel debugging, cross-cutting synthesis
    ```
 3. If routing instructions exist, compare against actual model_mix usage:
-   - Run `measure.py trends --json --days 30` if trends DB exists
+   - Run `python3 $MEASURE_PY trends --json --days 30` if trends DB exists
    - Are subagents actually following the routing? (check model_mix percentages)
    - Is the instruction specific enough? ("default to haiku" vs detailed task-to-model table)
    - If >70% of tokens go to Opus despite routing instructions, the instructions may be too vague

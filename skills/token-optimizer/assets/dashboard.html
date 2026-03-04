@@ -302,10 +302,13 @@ h1, h2, h3, h4 { font-weight: 400; }
 }
 
 .bar-label {
-  width: 88px;
+  width: 100px;
   color: var(--c-text-dim);
   flex-shrink: 0;
   text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bar-track {
@@ -330,36 +333,14 @@ h1, h2, h3, h4 { font-weight: 400; }
 }
 
 .bar-value {
-  width: 50px;
+  width: 70px;
   color: var(--c-text-dim);
   flex-shrink: 0;
   text-align: right;
   font-size: 14px;
 }
 
-/* Component breakdown table */
-.opt-grid {
-  display: grid;
-  grid-template-columns: 1fr 100px 100px;
-  gap: 16px;
-  font-size: 15px;
-  font-family: var(--font-sans);
-  letter-spacing: 0.05em;
-}
-
-.opt-head {
-  color: var(--c-text-dim);
-  text-transform: uppercase;
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  margin-bottom: 8px;
-}
-
-.opt-row {
-  padding-top: 12px;
-  border-top: 1px solid var(--c-border);
-  color: var(--c-text-main);
-}
+/* (opt-grid removed: replaced by component-cards) */
 
 /* ========== SECTION VIEW (Category Items) ========== */
 .section-header {
@@ -428,10 +409,11 @@ h1, h2, h3, h4 { font-weight: 400; }
 }
 
 .setting-desc {
-  font-size: 16px;
+  font-size: 14px;
   color: var(--c-text-dim);
   letter-spacing: 0;
   font-family: var(--font-sans);
+  word-break: break-word;
 }
 
 .setting-right {
@@ -558,6 +540,9 @@ input:checked + .slider:before {
   color: var(--c-text-main);
   font-family: var(--font-sans);
   line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .notes-area {
@@ -652,6 +637,18 @@ input:checked + .slider:before {
   color: var(--c-text-dim);
   font-size: 16px;
   font-family: var(--font-mono);
+}
+
+.last-updated {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-dim);
+  border-bottom: 1px solid var(--c-border);
+  padding-bottom: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+.last-updated .update-cmd {
+  color: var(--c-accent-cyan);
 }
 
 /* ========== EXPANDABLE SETTING ROWS ========== */
@@ -959,6 +956,9 @@ input:checked + .slider:before {
   font-size: 36px;
   color: var(--c-text-main);
   margin-bottom: var(--s-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stat-card .stat-card-label {
@@ -1017,6 +1017,7 @@ input:checked + .slider:before {
 
 .model-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--s-4);
   margin-top: var(--s-2);
   font-size: 13px;
@@ -1454,7 +1455,7 @@ function parsePlan(planMd) {
   return items;
 }
 
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 /* ========== AUDIT CONTENT PARSER ========== */
 function extractFindings(auditMd) {
@@ -1592,6 +1593,23 @@ var DB = (function() {
     renderHealth();
     updateRightPanel();
     bind();
+
+    // Standalone mode: hide empty audit tabs, default to Trends or first populated tab
+    if (d.standalone) {
+      var hasAnyItems = false;
+      ['quick', 'medium', 'deep', 'habits'].forEach(function(k) {
+        var badge = document.getElementById('badge-' + k);
+        if (badge && (!badge.textContent || badge.textContent === '0')) {
+          var navItem = document.querySelector('.nav-item[data-view="' + k + '"]');
+          if (navItem) navItem.style.display = 'none';
+        } else {
+          hasAnyItems = true;
+        }
+      });
+      // Default to Trends tab (analytics are always relevant for standalone)
+      var trendsNav = document.querySelector('.nav-item[data-view="trends"]');
+      if (trendsNav) trendsNav.click();
+    }
   }
 
   function renderNav() {
@@ -1617,6 +1635,25 @@ var DB = (function() {
     document.getElementById('hero-sub').innerHTML =
       'tokens loaded before you type a word. You start every session with only <span>' + fn(remaining) + '</span> left for actual conversation.';
 
+    // Last updated timestamp
+    var ts = data.generated_at ? new Date(data.generated_at).toLocaleString() : 'unknown';
+    var headerEl = document.querySelector('#view-overview .header');
+    if (headerEl) {
+      var existingTs = headerEl.querySelector('.last-updated');
+      if (!existingTs) {
+        var tsDiv = document.createElement('div');
+        tsDiv.className = 'last-updated';
+        if (data.standalone) {
+          tsDiv.innerHTML = 'Last updated: ' + esc(ts) +
+            ' &middot; Run <span class="update-cmd">/token-optimizer</span> for a full audit with recommendations.';
+        } else {
+          tsDiv.innerHTML = 'Last updated: ' + esc(ts) +
+            ' &middot; To refresh, run <span class="update-cmd">/token-optimizer</span> again.';
+        }
+        headerEl.appendChild(tsDiv);
+      }
+    }
+
     // Before You Start card
     document.getElementById('stat-pct').innerHTML = pct + '% <span class="mini-label">gone before you type</span>';
     // Generate bar chart from components
@@ -1637,7 +1674,7 @@ var DB = (function() {
       return '<div class="bar-row">' +
         '<span class="bar-label">' + barLabels[i] + '</span>' +
         '<div class="bar-track"><div class="bar-fill' + fixedClass + '" style="width:' + w + '%"></div></div>' +
-        '<span class="bar-value">' + fn(v) + '</span>' +
+        '<span class="bar-value">' + fn(v) + ' tok</span>' +
         '</div>';
     }).join('');
     document.getElementById('chart-bars').innerHTML = barsHtml;
@@ -1646,9 +1683,19 @@ var DB = (function() {
 
     // What You'd Save card
     var planTokens = items.reduce(function(s, it) { return s + it.tokens; }, 0);
-    document.getElementById('stat-potential').innerHTML = '~' + fn(planTokens) + ' <span class="mini-label">tokens recoverable</span>';
-    document.getElementById('potential-desc').textContent =
-      fn(ctrl) + ' of your ' + fn(total) + ' tokens are things you can change. This plan targets ~' + fn(planTokens) + ' in savings. That means longer conversations and fewer compaction interruptions.';
+    if (planTokens > 0) {
+      document.getElementById('stat-potential').innerHTML = '~' + fn(planTokens) + ' <span class="mini-label">tokens recoverable</span>';
+      document.getElementById('potential-desc').textContent =
+        fn(ctrl) + ' of your ' + fn(total) + ' tokens are things you can change. This plan targets ~' + fn(planTokens) + ' in savings. That means longer conversations and fewer compaction interruptions.';
+    } else if (data.standalone) {
+      document.getElementById('stat-potential').innerHTML = fn(ctrl) + ' <span class="mini-label">controllable tokens</span>';
+      document.getElementById('potential-desc').textContent =
+        fn(ctrl) + ' of your ' + fn(total) + ' tokens are things you can change. Run /token-optimizer for a full audit with specific savings estimates.';
+    } else {
+      document.getElementById('stat-potential').innerHTML = '0 <span class="mini-label">tokens recoverable</span>';
+      document.getElementById('potential-desc').textContent =
+        'Your setup looks clean. No optimizations identified.';
+    }
 
     // Component cards (expandable)
     var componentData = getComponentDetails(data);
@@ -1683,7 +1730,7 @@ var DB = (function() {
       if (comp.related && comp.related.length) {
         cardsHtml += '<div class="detail-heading">Related Optimizations</div>';
         comp.related.forEach(function(rel) {
-          cardsHtml += '<a class="related-link" data-nav-section="' + rel.section + '">&rarr; ' + esc(rel.title) + '</a>';
+          cardsHtml += '<a class="related-link" data-nav-section="' + esc(rel.section) + '">&rarr; ' + esc(rel.title) + '</a>';
         });
       }
 
@@ -1692,6 +1739,23 @@ var DB = (function() {
     var gridEl = document.getElementById('breakdown-grid');
     gridEl.className = 'component-cards';
     gridEl.innerHTML = cardsHtml;
+
+    // Standalone mode: CTA or auto-recommendations banner
+    if (data.standalone) {
+      var ctaEl = document.createElement('div');
+      ctaEl.className = 'card wide';
+      if (data.auto_plan && items.length > 0) {
+        ctaEl.innerHTML = '<div class="card-header"><span>Auto-Detected Recommendations</span></div>' +
+          '<div class="empty-state" style="text-align:left;color:var(--c-text-dim);font-size:14px;">' +
+          'These recommendations are auto-generated from your config. Browse them in the tabs on the left.<br>' +
+          'For deeper analysis (semantic duplication, content quality), run <code style="color:var(--c-accent-cyan)">/token-optimizer</code> for a full LLM-powered audit.</div>';
+      } else {
+        ctaEl.innerHTML = '<div class="card-header"><span>Optimization Recommendations</span></div>' +
+          '<div class="empty-state">No auto-detected issues. Your setup looks clean.<br>' +
+          'Run <code style="color:var(--c-accent-cyan)">/token-optimizer</code> for a full audit with deeper analysis.</div>';
+      }
+      gridEl.parentNode.insertBefore(ctaEl, gridEl.nextSibling);
+    }
   }
 
   function renderSectionViews() {
@@ -1702,11 +1766,23 @@ var DB = (function() {
       var secItems = items.filter(function(it) { return it.section === sec; });
       var isHabits = (sec === 'habits');
 
+      var ts = data.generated_at ? new Date(data.generated_at).toLocaleString() : 'unknown';
       var html = '<div class="section-header">' +
         '<div class="label">' + (isHabits ? 'Recommendations' : 'Optimization Plan') + '</div>' +
         '<h1>' + (groupLabels[sec] || sec) + '</h1>' +
         '<p>' + (groupDescs[sec] || '') + '</p>' +
         '</div>';
+
+      if (data.auto_plan) {
+        html += '<div class="last-updated">Last updated: ' + esc(ts) +
+          ' · Auto-detected. Run <span class="update-cmd">/token-optimizer</span> for deeper LLM-powered analysis.</div>';
+      } else if (data.standalone) {
+        html += '<div class="last-updated">Last updated: ' + esc(ts) +
+          ' · Optimization data not available in standalone mode. Run <span class="update-cmd">/token-optimizer</span> for a full audit with recommendations.</div>';
+      } else {
+        html += '<div class="last-updated">Last updated: ' + esc(ts) +
+          ' · To refresh, run <span class="update-cmd">/token-optimizer</span> again.</div>';
+      }
 
       if (secItems.length === 0) {
         html += '<div class="empty-state">No items in this category.</div>';
@@ -1773,7 +1849,7 @@ var DB = (function() {
 
   function splitDetailSections(detail) {
     // Try to split on sentence boundaries into WHY / TRADE-OFFS / WHAT CHANGES
-    var sentences = detail.split(/(?<=\.)\s+/);
+    var sentences = detail.match(/[^.]+\.(?:\s|$)/g) || [detail];
     if (sentences.length >= 3) {
       var mid = Math.ceil(sentences.length / 3);
       var end = Math.ceil(2 * sentences.length / 3);
@@ -1799,14 +1875,16 @@ var DB = (function() {
     if (!el) return;
     var t = data.trends;
 
+    var ts = data.generated_at ? new Date(data.generated_at).toLocaleString() : 'unknown';
     var html = '<div class="section-header">' +
       '<div class="label">Analytics</div>' +
       '<h1>Usage Trends</h1>' +
       '<p>How you use Claude Code across sessions.</p>' +
-      '</div>';
+      '</div>' +
+      '<div class="last-updated">Last updated: ' + esc(ts) + '</div>';
 
     if (!t) {
-      html += '<div class="empty-state">No trends data available. Run: python3 measure.py collect && python3 measure.py dashboard --coord-path PATH</div>';
+      html += '<div class="empty-state">No trends data yet. Sessions are collected automatically via the SessionEnd hook. Run a few sessions first, or manually: <span class="update-cmd">python3 measure.py collect</span></div>';
       el.innerHTML = html;
       return;
     }
@@ -1814,7 +1892,7 @@ var DB = (function() {
     // Hero stat cards
     html += '<div class="stat-row">' +
       '<div class="stat-card"><div class="stat-card-value">' + t.session_count + '</div><div class="stat-card-label">Sessions (' + t.period_days + 'd)</div></div>' +
-      '<div class="stat-card"><div class="stat-card-value">' + Math.round(t.avg_duration_minutes) + 'm</div><div class="stat-card-label">Avg Duration</div></div>' +
+      '<div class="stat-card"><div class="stat-card-value">' + Math.round(t.avg_duration_minutes || 0) + 'm</div><div class="stat-card-label">Avg Duration</div></div>' +
       '<div class="stat-card"><div class="stat-card-value">' + fn(t.avg_input_tokens + t.avg_output_tokens) + '</div><div class="stat-card-label">Avg Tokens/Session</div></div>' +
       '</div>';
 
@@ -1832,7 +1910,7 @@ var DB = (function() {
       html += '<div class="card wide"><div class="card-header"><span>Model Mix</span><span class="label">Which models do the work</span></div>';
       if (modelCount <= 1) {
         var singleModel = Object.keys(modelMix)[0] || 'unknown';
-        html += '<p style="font-size:13px;color:var(--c-text-dim);font-family:var(--font-mono);margin-bottom:var(--s-2);">All sessions use ' + singleModel + '. Consider defaulting agents to haiku (5x cheaper) or sonnet for data-gathering tasks.</p>';
+        html += '<p style="font-size:13px;color:var(--c-text-dim);font-family:var(--font-mono);margin-bottom:var(--s-2);">All sessions use ' + esc(singleModel) + '. Consider defaulting agents to haiku (5x cheaper) or sonnet for data-gathering tasks.</p>';
       } else {
         html += '<p style="font-size:13px;color:var(--c-text-dim);font-family:var(--font-mono);margin-bottom:var(--s-2);">Haiku is 5x cheaper for data-gathering. If you see mostly Opus, consider defaulting agents to Sonnet/Haiku.</p>';
       }
@@ -1841,7 +1919,7 @@ var DB = (function() {
         var tokens = modelMix[m] || 0;
         if (tokens > 0) {
           var pct = (tokens / modelTotal * 100).toFixed(1);
-          html += '<div class="model-segment ' + m + '" style="width:' + pct + '%" title="' + m + ': ' + pct + '% (' + fn(tokens) + ' tokens)"></div>';
+          html += '<div class="model-segment ' + m.replace(/[^a-z0-9-]/g,'') + '" style="width:' + pct + '%" title="' + esc(m) + ': ' + pct + '% (' + fn(tokens) + ' tokens)"></div>';
         }
       });
       var otherTokens = 0;
@@ -1854,11 +1932,11 @@ var DB = (function() {
         var tokens = modelMix[m] || 0;
         if (tokens > 0) {
           var pct = (tokens / modelTotal * 100).toFixed(0);
-          html += '<div class="model-legend-item"><div class="model-legend-dot ' + m + '"></div>' + m + ' ' + pct + '% (' + fn(tokens) + ')</div>';
+          html += '<div class="model-legend-item"><div class="model-legend-dot ' + m.replace(/[^a-z0-9-]/g,'') + '"></div>' + esc(m) + ' ' + pct + '% (' + fn(tokens) + ' tok)</div>';
         }
       });
       if (otherTokens > 0) {
-        html += '<div class="model-legend-item"><div class="model-legend-dot other"></div>other ' + (otherTokens/modelTotal*100).toFixed(0) + '%</div>';
+        html += '<div class="model-legend-item"><div class="model-legend-dot other"></div>other ' + (otherTokens/modelTotal*100).toFixed(0) + '% (' + fn(otherTokens) + ' tok)</div>';
       }
       html += '</div></div>';
     }
@@ -1875,7 +1953,7 @@ var DB = (function() {
         '<button class="date-nav-btn" data-range="30">30 days</button>' +
         '<span style="color:var(--c-text-dim);font-size:12px;margin:0 4px;">|</span>' +
         '<label style="font-size:12px;color:var(--c-text-dim);font-family:var(--font-mono);">Jump to:</label>' +
-        '<input type="date" class="date-picker-input" id="daily-date-picker" value="' + daily[0].date + '">' +
+        '<input type="date" class="date-picker-input" id="daily-date-picker" value="' + esc(daily[0].date) + '">' +
         '</div>';
       html += '<div id="daily-table-container">';
       html += buildDailyTable(daily, 7, null);
@@ -1892,16 +1970,16 @@ var DB = (function() {
     if (topSkills.length > 0) {
       var maxSkill = topSkills[0][1];
       html += '<div class="card wide"><div class="card-header"><span>Skills Used</span><span class="label">' +
-        Object.keys(skillsUsed).length + ' of ' + (t.skills.installed_count || '?') + ' installed</span></div>' +
+        Object.keys(skillsUsed).length + ' skills used of ' + (t.skills.installed_count || '?') + ' installed</span></div>' +
         '<div class="chart-container">';
       topSkills.forEach(function(entry) {
         var w = Math.max(3, (entry[1] / maxSkill) * 100);
         var sd = skillsDetail[entry[0]];
-        var tokLabel = sd ? ' (' + sd.frontmatter_tokens + ' tok)' : '';
+        var tokNote = sd ? sd.frontmatter_tokens + ' tok' : '~100 tok';
         html += '<div class="bar-row" data-skill-name="' + esc(entry[0]) + '" style="cursor:pointer;">' +
-          '<span class="bar-label" title="Click to see skill details">' + esc(entry[0].length > 16 ? entry[0].slice(0,15) + '\u2026' : entry[0]) + '</span>' +
+          '<span class="bar-label" style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(entry[0]) + ' (' + tokNote + ')">' + esc(entry[0]) + '</span>' +
           '<div class="bar-track"><div class="bar-fill" style="width:' + w + '%"></div></div>' +
-          '<span class="bar-value">' + entry[1] + tokLabel + '</span></div>';
+          '<span class="bar-value" style="width:60px;text-align:right;">' + entry[1] + ' sess</span></div>';
       });
       html += '</div></div>';
     }
@@ -2045,7 +2123,7 @@ var DB = (function() {
     var gitCommits = (data.trends && data.trends.git_commits) || {};
 
     var html = '<table class="session-table"><thead><tr>' +
-      '<th>Date</th><th>Sessions</th><th>Input</th><th>Output</th><th>Skills Used</th><th>Subagents</th><th>Commits</th>' +
+      '<th>Date</th><th>Sessions</th><th>Input Tokens</th><th>Output Tokens</th><th>Skills Used</th><th>Subagents</th><th>Commits</th>' +
       '</tr></thead><tbody>';
     filtered.forEach(function(d) {
       var skillNames = Object.keys(d.skills_used || {});
@@ -2072,8 +2150,8 @@ var DB = (function() {
         }
       }
 
-      html += '<tr class="daily-row" data-date="' + d.date + '" style="cursor:pointer;">' +
-        '<td>' + d.date + '</td>' +
+      html += '<tr class="daily-row" data-date="' + esc(d.date) + '" style="cursor:pointer;">' +
+        '<td>' + esc(d.date) + '</td>' +
         '<td>' + d.sessions + '</td>' +
         '<td>' + fn(d.total_input) + '</td>' +
         '<td>' + fn(d.total_output) + '</td>' +
@@ -2081,10 +2159,10 @@ var DB = (function() {
         '<td style="color:var(--c-text-dim);font-size:12px;">' + esc(agentStr) + '</td>' +
         '<td style="color:var(--c-text-dim);font-size:12px;">' + esc(commitStr) + '</td>' +
         '</tr>';
-      html += '<tr class="daily-detail" data-detail-date="' + d.date + '" style="display:none;">' +
+      html += '<tr class="daily-detail" data-detail-date="' + esc(d.date) + '" style="display:none;">' +
         '<td colspan="7" style="padding:0;">' +
-        '<div style="background:var(--c-surface-hover);padding:var(--s-2) var(--s-3);margin:2px 0;">' +
-        '<table class="session-table" style="margin:0;">' +
+        '<div style="background:var(--c-surface-hover);padding:var(--s-2) var(--s-3);margin:2px 0;overflow-x:auto;">' +
+        '<table class="session-table" style="margin:0;min-width:800px;">' +
         '<thead><tr><th>#</th><th>Duration</th><th>Input</th><th>Output</th><th>Messages</th><th>Cache Hit</th><th>Skills</th><th>Subagents</th><th>Topic</th><th>Project</th></tr></thead><tbody>';
       (d.session_details || []).forEach(function(sd, si) {
         var sdSkills = (sd.skills || []).join(', ') || 'none';
@@ -2093,11 +2171,11 @@ var DB = (function() {
         var sdProject = sd.project || '';
         html += '<tr>' +
           '<td>' + (si + 1) + '</td>' +
-          '<td>' + Math.round(sd.duration_minutes) + 'm</td>' +
+          '<td>' + Math.round(sd.duration_minutes || 0) + 'm</td>' +
           '<td>' + fn(sd.input_tokens) + '</td>' +
           '<td>' + fn(sd.output_tokens) + '</td>' +
-          '<td>' + sd.message_count + '</td>' +
-          '<td>' + (sd.cache_hit_rate * 100).toFixed(0) + '%</td>' +
+          '<td>' + (sd.message_count || 0) + '</td>' +
+          '<td>' + ((sd.cache_hit_rate || 0) * 100).toFixed(0) + '%</td>' +
           '<td style="color:var(--c-text-dim);font-size:12px;">' + esc(sdSkills.length > 30 ? sdSkills.slice(0,28) + '\u2026' : sdSkills) + '</td>' +
           '<td style="color:var(--c-text-dim);font-size:12px;">' + esc(sdAgents.length > 25 ? sdAgents.slice(0,23) + '\u2026' : sdAgents) + '</td>' +
           '<td style="color:var(--c-text-dim);font-size:12px;" title="' + esc(sdTopic) + '">' + esc(sdTopic.length > 40 ? sdTopic.slice(0,38) + '\u2026' : sdTopic) + '</td>' +
@@ -2130,14 +2208,16 @@ var DB = (function() {
     if (!el) return;
     var h = data.health;
 
+    var ts = data.generated_at ? new Date(data.generated_at).toLocaleString() : 'unknown';
     var html = '<div class="section-header">' +
       '<div class="label">Analytics</div>' +
       '<h1>Session Health</h1>' +
       '<p>Running sessions, version status, and automated processes.</p>' +
-      '</div>';
+      '</div>' +
+      '<div class="last-updated">Last updated: ' + esc(ts) + '</div>';
 
     if (!h) {
-      html += '<div class="empty-state">No health data available. Run: python3 measure.py dashboard --coord-path PATH</div>';
+      html += '<div class="empty-state">No health data available. This usually means no Claude Code processes are currently running.</div>';
       el.innerHTML = html;
       return;
     }
@@ -2161,7 +2241,7 @@ var DB = (function() {
         var flagHtml = '';
         var flags = s.flags || [];
         flags.forEach(function(f) {
-          var cls = f.toLowerCase().replace('likely ', '');
+          var cls = f.toLowerCase().replace('likely ', '').replace(/[^a-z0-9-]/g, '');
           flagHtml += '<span class="flag-badge ' + cls + '">' + esc(f) + '</span>';
         });
         if (flags.length === 0) flagHtml = '<span style="color:var(--c-accent-cyan);">OK</span>';
@@ -2219,7 +2299,7 @@ var DB = (function() {
 
     var html = '';
     sel.forEach(function(it) {
-      html += '<div class="selected-item">' + esc(it.title.slice(0, 50)) + '</div>';
+      html += '<div class="selected-item" title="' + esc(it.title) + '">' + esc(it.title) + '</div>';
     });
     listEl.innerHTML = html;
   }
@@ -2405,10 +2485,11 @@ var DB = (function() {
   }
 
   function fn(n) {
+    if (n == null || isNaN(n)) return '0';
     if (n >= 1000000000) return (n/1000000000).toFixed(1).replace(/\.0$/,'') + 'B';
     if (n >= 1000000) return (n/1000000).toFixed(1).replace(/\.0$/,'') + 'M';
     if (n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,'') + 'K';
-    return String(n);
+    return String(Math.round(n));
   }
 
   return { init: init };

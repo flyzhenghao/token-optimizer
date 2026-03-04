@@ -13,8 +13,21 @@ Token optimization specialist. Audits a Claude Code setup, identifies context wi
 
 ## Phase 0: Initialize
 
+0. **Resolve measure.py path** (works for both skill and plugin installs):
+```bash
+MEASURE_PY=""
+# Check skill install first, then plugin cache
+if [ -f "$HOME/.claude/skills/token-optimizer/scripts/measure.py" ]; then
+  MEASURE_PY="$HOME/.claude/skills/token-optimizer/scripts/measure.py"
+else
+  MEASURE_PY="$(find "$HOME/.claude/plugins/cache" -path "*/token-optimizer/scripts/measure.py" 2>/dev/null | head -1)"
+fi
+[ -z "$MEASURE_PY" ] || [ ! -f "$MEASURE_PY" ] && { echo "[Error] measure.py not found. Is Token Optimizer installed?"; exit 1; }
+```
+Use `$MEASURE_PY` for all subsequent measure.py calls in this session.
+
 1. **Quick pre-check** (detect minimal setups):
-   Run `python3 ~/.claude/skills/token-optimizer/scripts/measure.py report` (or the installed path).
+   Run `python3 $MEASURE_PY report`.
    If estimated controllable tokens < 1,000 and no CLAUDE.md exists, short-circuit:
    ```
    [Token Optimizer] Your setup is already minimal (~X tokens overhead).
@@ -48,13 +61,13 @@ fi
 3. **Create coordination folder**:
 ```bash
 COORD_PATH=$(mktemp -d /tmp/token-optimizer-XXXXXXXXXX)
-[ -d "$COORD_PATH" ] || { echo "[Error] Failed to create coordination folder. Check /tmp permissions."; return 1; }
+[ -d "$COORD_PATH" ] || { echo "[Error] Failed to create coordination folder. Check /tmp permissions."; exit 1; }
 mkdir -p "$COORD_PATH"/{audit,analysis,plan,verification}
 ```
 
 4. **Check SessionEnd hook** (first-time setup, skips silently if already installed):
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py check-hook
+python3 $MEASURE_PY check-hook
 ```
    - If exit 0: hook is already installed, skip entirely and proceed to Phase 1.
    - If exit 1: explain and offer to install:
@@ -62,16 +75,18 @@ python3 ~/.claude/skills/token-optimizer/scripts/measure.py check-hook
    ```
    [Token Optimizer] Usage analytics hook not installed.
 
-   The SessionEnd hook runs `measure.py collect` once when a session closes (~1 second).
-   It collects session duration, token usage, skills invoked, and model mix into a local
-   SQLite database. No data leaves your machine. No background process, no daemon.
+   The SessionEnd hook runs `measure.py collect` then `measure.py dashboard --quiet`
+   when a session closes. It collects session data into a local SQLite database,
+   then regenerates your persistent dashboard. No data leaves your machine.
+   ~2 seconds total. No background process, no daemon.
 
    Why a hook instead of a cron job? Session data only exists after a session ends.
    A cron job polling mid-session would find nothing new. The hook fires exactly once,
-   runs for ~1 second, exits. Zero background processes. It's the Claude Code native
+   runs for ~2 seconds, exits. Zero background processes. It's the Claude Code native
    pattern for post-session work.
 
    Data stored: ~/.claude/_backups/token-optimizer/trends.db
+   Dashboard: ~/.claude/_backups/token-optimizer/dashboard.html
    Remove anytime: delete the SessionEnd entry from ~/.claude/settings.json
    ```
 
@@ -162,14 +177,22 @@ What should we tackle first?
 **Then generate the interactive dashboard:**
 
 ```bash
-python3 ~/.claude/skills/token-optimizer/scripts/measure.py dashboard --coord-path $COORD_PATH --serve
+python3 $MEASURE_PY dashboard --coord-path $COORD_PATH
 ```
 
-This serves an interactive HTML dashboard at `http://localhost:8080/dashboard.html` with all findings, a token donut chart, and an optimization checklist. The user can browse categories, toggle optimizations, and click "Copy Prompt" to paste selected items back into Claude Code.
+This generates an interactive HTML dashboard and opens it in the default browser. The dashboard shows all findings, a token donut chart, and an optimization checklist. The user can browse categories, toggle optimizations, and click "Copy Prompt" to paste selected items back into Claude Code.
 
-Tell the user: "Dashboard running at http://localhost:8080/dashboard.html. Browse findings by category, check the optimizations you want, click Copy Prompt and paste back here. Or just tell me directly what to tackle."
+Tell the user: "Dashboard opened in your browser. Browse findings by category, check the optimizations you want, click Copy Prompt and paste back here. Or just tell me directly what to tackle."
 
-The terminal summary above remains for headless/terminal-only environments. Dashboard is additive.
+Also mention the persistent dashboard:
+```
+Your persistent dashboard (auto-updated every session):
+  Local:  file://~/.claude/_backups/token-optimizer/dashboard.html
+  Remote: python3 $MEASURE_PY dashboard --serve
+          Then open http://localhost:8080/dashboard.html (SSH tunnel for remote)
+```
+
+For headless/remote servers, the user can run `python3 $MEASURE_PY dashboard --coord-path $COORD_PATH --serve` separately in a terminal to serve over HTTP. Never use `--serve` from within the SKILL.md orchestrator (it blocks with `serve_forever`).
 
 **Wait for user decision before proceeding.**
 
@@ -189,9 +212,10 @@ Templates in `examples/`. Always backup before changes. Present diffs for approv
 
 Beyond the core `report`/`snapshot`/`compare`/`dashboard` commands, the measurement tool includes:
 
+- **`measure.py dashboard`**: Generates a standalone persistent dashboard at `~/.claude/_backups/token-optimizer/dashboard.html` with Trends and Health tabs. Auto-regenerated by the SessionEnd hook. Bookmark the file URL for quick access.
 - **`measure.py trends [--days N] [--json]`**: Scans all JSONL session logs across projects. Shows which skills you actually use, subagent patterns, model mix, and cross-references against installed skills to surface unused ones. Default: last 30 days.
 - **`measure.py health`**: Detects running Claude Code sessions, checks their version against installed, flags stale/zombie processes, and shows automated Claude-related processes.
-- Both `trends` and `health` data appear as interactive tabs in the dashboard when generated via `measure.py dashboard`.
+- Both `trends` and `health` data appear as interactive tabs in the dashboard (standalone or full audit).
 
 ---
 
@@ -213,7 +237,7 @@ SAVINGS ACHIEVED
 
 NEXT STEPS (Behavioral, ordered by ROI)
 1. Default subagents to Haiku (60x cheaper than Opus, see Model Routing)
-2. Use /compact at 70% context (quality degrades past 70%)
+2. Use /compact at 50-70% context (quality degrades past 70%)
 3. Use /clear between unrelated topics
 4. Use Plan Mode (Shift+Tab x2) before complex tasks
 5. Batch related requests into one message
@@ -269,7 +293,7 @@ NEXT STEPS (Behavioral, ordered by ROI)
 If something goes wrong, restore from the backup created in Phase 0:
 ```bash
 # Find your most recent backup
-ls -lt ~/.claude/_backups/token-optimizer-* | head -5
+ls -ltd ~/.claude/_backups/token-optimizer-* | head -5
 
 # Restore specific files (replace TIMESTAMP with your backup folder name)
 BACKUP="$HOME/.claude/_backups/token-optimizer-TIMESTAMP"
@@ -277,7 +301,14 @@ cp "$BACKUP/CLAUDE.md" ~/.claude/CLAUDE.md
 cp "$BACKUP/settings.json" ~/.claude/settings.json
 cp -r "$BACKUP/commands" ~/.claude/commands
 # MEMORY.md files have the project name in the filename
-cp "$BACKUP/MEMORY-*.md" ~/.claude/projects/*/memory/MEMORY.md
+for f in "$BACKUP"/MEMORY-*.md; do
+  [ -f "$f" ] || continue
+  projname="${f##*/MEMORY-}"; projname="${projname%.md}"
+  # Guard against path traversal in crafted backup filenames
+  case "$projname" in *..* | */* ) echo "[Warning] Skipping suspicious backup: $f"; continue ;; esac
+  [ -d "$HOME/.claude/projects/${projname}/memory" ] || continue
+  cp "$f" "$HOME/.claude/projects/${projname}/memory/MEMORY.md"
+done
 ```
 
 Backups are never automatically deleted. They accumulate in `~/.claude/_backups/`.

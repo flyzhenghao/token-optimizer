@@ -9,9 +9,10 @@ Usage:
     python3 measure.py snapshot after     # Save post-optimization snapshot
     python3 measure.py compare            # Compare before vs after
     python3 measure.py report             # Full standalone report
-    python3 measure.py dashboard --coord-path /tmp/...  # Generate interactive dashboard
-    python3 measure.py dashboard --coord-path /tmp/... --serve  # Serve over HTTP (headless)
-    python3 measure.py dashboard --coord-path /tmp/... --serve --port 9000  # Custom port
+    python3 measure.py dashboard                         # Standalone dashboard (Trends + Health)
+    python3 measure.py dashboard --coord-path /tmp/...   # Full dashboard (after audit)
+    python3 measure.py dashboard --serve [--port 9000]   # Serve over HTTP (headless)
+    python3 measure.py dashboard --quiet                 # Regenerate silently (for hooks)
     python3 measure.py health             # Check running session health
     python3 measure.py trends             # Usage trends (last 30 days)
     python3 measure.py trends --days 7    # Usage trends (shorter window)
@@ -32,7 +33,7 @@ import re
 import subprocess
 import sys
 import platform
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 CHARS_PER_TOKEN = 4.0
@@ -40,6 +41,7 @@ CHARS_PER_TOKEN = 4.0
 HOME = Path.home()
 CLAUDE_DIR = HOME / ".claude"
 SNAPSHOT_DIR = CLAUDE_DIR / "_backups" / "token-optimizer"
+DASHBOARD_PATH = SNAPSHOT_DIR / "dashboard.html"
 
 # Tokens per skill frontmatter (loaded at startup)
 TOKENS_PER_SKILL_APPROX = 100
@@ -128,7 +130,14 @@ def find_projects_dir():
     dirs = [d for d in projects_base.iterdir() if d.is_dir()]
     if not dirs:
         return None
-    result = max(dirs, key=lambda d: d.stat().st_mtime)
+
+    def _safe_mtime(d):
+        try:
+            return d.stat().st_mtime
+        except OSError:
+            return 0
+
+    result = max(dirs, key=_safe_mtime)
     print(f"  [Warning] Could not match cwd to project dir. Using most recent: {result.name}")
     return result
 
@@ -381,16 +390,44 @@ def measure_components():
                     "lines": count_lines(claude_md),
                 }
 
-    # MEMORY.md
+    # MEMORY.md (check all project dirs, not just cwd match)
     projects_dir = find_projects_dir()
+    memory_tokens = 0
+    memory_lines = 0
+    memory_path_str = ""
+    memory_exists = False
     if projects_dir:
         memory_path = projects_dir / "memory" / "MEMORY.md"
-        components["memory_md"] = {
-            "path": str(memory_path),
-            "exists": memory_path.exists(),
-            "tokens": estimate_tokens_from_file(memory_path) if memory_path.exists() else 0,
-            "lines": count_lines(memory_path) if memory_path.exists() else 0,
-        }
+        memory_path_str = str(memory_path)
+        memory_exists = memory_path.exists()
+        if memory_exists:
+            memory_tokens = estimate_tokens_from_file(memory_path)
+            memory_lines = count_lines(memory_path)
+    else:
+        # No cwd match, scan all project dirs for any MEMORY.md
+        projects_base = CLAUDE_DIR / "projects"
+        if projects_base.exists():
+            def _safe_mtime_mem(d):
+                try:
+                    return d.stat().st_mtime
+                except OSError:
+                    return 0
+            for pdir in sorted(projects_base.iterdir(), key=_safe_mtime_mem, reverse=True):
+                if not pdir.is_dir():
+                    continue
+                mp = pdir / "memory" / "MEMORY.md"
+                if mp.exists():
+                    memory_path_str = str(mp)
+                    memory_exists = True
+                    memory_tokens = estimate_tokens_from_file(mp)
+                    memory_lines = count_lines(mp)
+                    break
+    components["memory_md"] = {
+        "path": memory_path_str,
+        "exists": memory_exists,
+        "tokens": memory_tokens,
+        "lines": memory_lines,
+    }
 
     # Skills (read actual frontmatter size + check description quality in single pass)
     skills_dir = CLAUDE_DIR / "skills"
@@ -619,7 +656,7 @@ def calculate_totals(components):
     # Keys that don't contribute direct token overhead (metadata only)
     non_token_keys = {
         "claudeignore", "hooks", "settings_env", "settings_local",
-        "skill_frontmatter_quality",
+        "skill_frontmatter_quality", "skills_detail",
     }
 
     for name, info in components.items():
@@ -1014,7 +1051,7 @@ def _serve_dashboard(filepath, port=8080):
     for attempt_port in range(port, port + 20):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(("", attempt_port))
+                s.bind(("127.0.0.1", attempt_port))
             port = attempt_port
             break
         except OSError:
@@ -1023,30 +1060,55 @@ def _serve_dashboard(filepath, port=8080):
         print(f"  Error: no available port in range {port}-{port + 19}")
         sys.exit(1)
 
-    # Get machine's local IP for remote access hint
-    local_ip = "0.0.0.0"
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-    except Exception:
-        pass
-
     handler = http.server.SimpleHTTPRequestHandler
 
-    class QuietHandler(handler):
+    class DashboardHandler(handler):
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=serve_dir, **kw)
 
         def log_message(self, format, *a):
             pass  # suppress per-request logs
 
+        def end_headers(self):
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            super().end_headers()
+
+        def _redirect_root(self):
+            if self.path in ("/", ""):
+                self.send_response(302)
+                self.send_header("Location", f"/{filename}")
+                self.end_headers()
+                return True
+            return False
+
+        def _check_allowed(self):
+            """Only serve the dashboard file itself, nothing else."""
+            requested = self.path.lstrip("/").split("?")[0]
+            if requested != filename:
+                self.send_error(403, "Forbidden")
+                return False
+            return True
+
+        def do_GET(self):
+            if self._redirect_root():
+                return
+            if not self._check_allowed():
+                return
+            super().do_GET()
+
+        def do_HEAD(self):
+            if self._redirect_root():
+                return
+            if not self._check_allowed():
+                return
+            super().do_HEAD()
+
     print(f"\n  Serving dashboard at:")
-    print(f"    Local:   http://localhost:{port}/{filename}")
-    print(f"    Network: http://{local_ip}:{port}/{filename}")
+    print(f"    http://localhost:{port}/")
     print(f"\n  Press Ctrl+C to stop.\n")
 
-    with socketserver.TCPServer(("", port), QuietHandler) as httpd:
+    with socketserver.TCPServer(("127.0.0.1", port), DashboardHandler) as httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
@@ -1138,24 +1200,394 @@ def generate_dashboard(coord_path):
 
     # Load template and inject data
     template = template_path.read_text(encoding="utf-8")
-    data_json = json.dumps(data, ensure_ascii=False, default=str)
-    injected = template.replace(
-        "window.__TOKEN_DATA__ = null;",
-        f"window.__TOKEN_DATA__ = {data_json};",
-        1,
-    )
+    data_json = json.dumps(data, ensure_ascii=True, default=str)
+    data_json = data_json.replace("</", "<\\/")  # Prevent </script> injection
+    placeholder = "window.__TOKEN_DATA__ = null;"
+    injected = template.replace(placeholder, f"window.__TOKEN_DATA__ = {data_json};", 1)
+    if injected == template:
+        print("  [Warning] Data injection failed: placeholder not found in template.")
 
     # Write output
     out_dir = coord / "analysis"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "dashboard.html"
-    out_path.write_text(injected, encoding="utf-8")
+    fd = os.open(str(out_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(injected)
     print(f"  Dashboard written to: {out_path}")
 
     # Open in browser
     _open_in_browser(out_path)
     print(f"  Opened in browser.")
     return str(out_path)
+
+
+def generate_standalone_dashboard(days=30, quiet=False):
+    """Generate a persistent Trends + Health dashboard (no audit data needed).
+
+    Outputs to DASHBOARD_PATH (~/.claude/_backups/token-optimizer/dashboard.html).
+    Used by the SessionEnd hook for auto-refresh and for standalone viewing.
+    """
+    script_dir = Path(__file__).resolve().parent
+    template_path = script_dir.parent / "assets" / "dashboard.html"
+    if not template_path.exists():
+        if not quiet:
+            print(f"Error: dashboard template not found at: {template_path}")
+        return None
+
+    if not quiet:
+        print("  Measuring current token overhead...")
+    components = measure_components()
+    totals = calculate_totals(components)
+
+    snapshot = {
+        "components": components,
+        "totals": totals,
+        "session_baselines": get_session_baselines(5),
+    }
+
+    if not quiet:
+        print("  Collecting usage trends...")
+    try:
+        trends = _collect_trends_data(days=days)
+    except Exception:
+        trends = None
+
+    if not quiet:
+        print("  Checking session health...")
+    try:
+        health = _collect_health_data()
+    except Exception:
+        health = None
+
+    # Generate auto-recommendations from rules engine
+    if not quiet:
+        print("  Generating auto-recommendations...")
+    auto_plan, rec_count = generate_auto_recommendations(components, trends=trends, days=days)
+    if not quiet and rec_count > 0:
+        print(f"  Found {rec_count} auto-recommendations")
+
+    data = {
+        "snapshot": snapshot,
+        "audit": {},
+        "plan": auto_plan if auto_plan else None,
+        "trends": trends,
+        "health": health,
+        "standalone": True,
+        "auto_plan": True,
+        "generated_at": datetime.now().isoformat(),
+    }
+
+    template = template_path.read_text(encoding="utf-8")
+    data_json = json.dumps(data, ensure_ascii=True, default=str)
+    data_json = data_json.replace("</", "<\\/")  # Prevent </script> injection
+    placeholder = "window.__TOKEN_DATA__ = null;"
+    injected = template.replace(placeholder, f"window.__TOKEN_DATA__ = {data_json};", 1)
+    if injected == template:
+        if not quiet:
+            print("  [Warning] Data injection failed: placeholder not found in template.")
+        return None
+
+    try:
+        SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(DASHBOARD_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(injected)
+    except OSError as e:
+        if not quiet:
+            print(f"  [Error] Failed to write dashboard: {e}")
+        return None
+
+    if not quiet:
+        print(f"  Dashboard: {DASHBOARD_PATH}")
+        print(f"  Local:  {DASHBOARD_PATH.as_uri()}")
+        print(f"  Remote: python3 {Path(__file__).resolve()} dashboard --serve")
+
+    return str(DASHBOARD_PATH)
+
+
+def generate_auto_recommendations(components, trends=None, days=30):
+    """Generate rule-based optimization recommendations without any LLM.
+
+    Produces a markdown plan string in the same format as the LLM-generated
+    optimization plan, so the existing dashboard parsePlan() rendering works.
+
+    Each recommendation includes nuanced, contextual guidance designed to be
+    pasted into Claude Code as a prompt. The guidance tells the model WHAT to
+    optimize, WHY it matters, and HOW to do it without losing important content.
+
+    Returns (plan_markdown_string, recommendation_count).
+    """
+    quick = []
+    medium = []
+    deep = []
+    habits = []
+
+    # --- Rule 1: MEMORY.md over 200 lines ---
+    mem = components.get("memory_md", {})
+    mem_lines = mem.get("lines", 0)
+    mem_tokens = mem.get("tokens", 0)
+    if mem_lines > 200:
+        excess = mem_lines - 200
+        est_waste = int(excess * (mem_tokens / max(mem_lines, 1)))
+        quick.append(
+            f"**Trim MEMORY.md from {mem_lines} to under 200 lines**: "
+            f"Claude auto-loads the first 200 lines of MEMORY.md every session. "
+            f"Your file is {mem_lines} lines ({mem_tokens:,} tokens). The extra {excess} lines "
+            f"are truncated from the visible context but their tokens are still counted toward your window.\n"
+            f"  Review each entry and ask: is this still accurate? Is it actionable today? "
+            f"Could it live in a topic-specific file (e.g., debugging.md, patterns.md) in the memory/ directory instead? "
+            f"Entries to prioritize for removal: resolved issues, completed migrations, one-time setup notes, "
+            f"and verbose implementation details that belong in reference files. "
+            f"Preserve: active project context, recurring patterns, correction logs, and partner/relationship notes. "
+            f"~{est_waste:,} tokens recoverable."
+        )
+    elif mem_lines > 150:
+        quick.append(
+            f"**MEMORY.md approaching 200-line limit ({mem_lines} lines)**: "
+            f"Claude truncates MEMORY.md after 200 lines. You have {200 - mem_lines} lines of headroom. "
+            f"Proactively move detailed notes to topic files in the memory/ directory. "
+            f"Keep MEMORY.md as an index of high-signal, frequently-referenced items."
+        )
+
+    # --- Rule 2: CLAUDE.md too large ---
+    claude_tokens = 0
+    claude_lines = 0
+    for key in components:
+        if key.startswith("claude_md") and components[key].get("exists"):
+            claude_tokens += components[key].get("tokens", 0)
+            claude_lines += components[key].get("lines", 0)
+    if claude_tokens > 1200:
+        quick.append(
+            f"**Slim CLAUDE.md ({claude_tokens:,} tokens, target ~800)**: "
+            f"Everything in CLAUDE.md loads every single message you send. "
+            f"This is prime real estate, only the most critical instructions belong here.\n"
+            f"  Move to skills (loaded on-demand, ~100 tokens in menu): workflow guides, coding standards, "
+            f"deployment procedures, detailed templates. "
+            f"Move to reference files (zero cost until read): API docs, config examples, architecture notes. "
+            f"Keep in CLAUDE.md: identity/personality, critical behavioral rules, key file paths, "
+            f"and short pointers to skills and references. "
+            f"Don't delete content, reorganize it. A 2-line pointer to a skill costs 100x less than "
+            f"50 lines of inline instructions. ~{claude_tokens - 800:,} tokens recoverable."
+        )
+    elif claude_tokens > 800:
+        medium.append(
+            f"**Consider slimming CLAUDE.md ({claude_tokens:,} tokens)**: "
+            f"Your CLAUDE.md is above the ~800 token target but not critically large. "
+            f"Review for any sections that could become skills or reference files. "
+            f"Focus on content that's only relevant for specific workflows."
+        )
+
+    # --- Rule 3: Unused skills (requires trends data) ---
+    if trends:
+        never_used = trends.get("skills", {}).get("never_used", [])
+        installed_count = trends.get("skills", {}).get("installed_count", 0)
+        if len(never_used) >= 5:
+            overhead = len(never_used) * TOKENS_PER_SKILL_APPROX
+            skill_list = ", ".join(sorted(never_used)[:15])
+            if len(never_used) > 15:
+                skill_list += f", ... and {len(never_used) - 15} more"
+            quick.append(
+                f"**Archive {len(never_used)} unused skills ({len(never_used)} of {installed_count} never used in {days} days)**: "
+                f"Each installed skill costs ~100 tokens in the startup menu, every session, whether you use it or not. "
+                f"These {len(never_used)} skills cost ~{overhead:,} tokens/session for zero benefit.\n"
+                f"  Skills: {skill_list}\n"
+                f"  Archive by moving to ~/.claude/skills/_archived/ (create this directory first). "
+                f"This removes them from the menu. Restore any skill by moving it back. "
+                f"Before archiving, scan the list for skills that are seasonal or rarely-needed-but-critical "
+                f"(e.g., a deploy skill you only use monthly). Keep those. Archive the rest. "
+                f"~{overhead:,} tokens recoverable."
+            )
+        elif len(never_used) >= 2:
+            overhead = len(never_used) * TOKENS_PER_SKILL_APPROX
+            skill_list = ", ".join(sorted(never_used))
+            medium.append(
+                f"**Review {len(never_used)} unused skills**: "
+                f"These skills haven't been invoked in {days} days: {skill_list}. "
+                f"Consider archiving to ~/.claude/skills/_archived/. ~{overhead:,} tokens recoverable."
+            )
+
+    # --- Rule 4: Missing .claudeignore ---
+    ignore = components.get("claudeignore", {})
+    if not ignore.get("exists"):
+        medium.append(
+            "**Create .claudeignore**: "
+            "No .claudeignore found in your project. Without it, Claude Code may inject system reminders "
+            "about large or binary files into your context window, wasting tokens on irrelevant content.\n"
+            "  Create .claudeignore in your project root (same syntax as .gitignore). Include: "
+            "build artifacts (dist/, node_modules/, .next/, __pycache__/), large data files, "
+            "generated files, logs, and anything you don't want Claude indexing. "
+            "See the token-optimizer examples/ directory for a starter template."
+        )
+
+    # --- Rule 5: Verbose skill descriptions ---
+    quality = components.get("skill_frontmatter_quality", {})
+    verbose = quality.get("verbose_skills", [])
+    if len(verbose) >= 3:
+        names = [s["name"] for s in verbose[:10]]
+        medium.append(
+            f"**Tighten {len(verbose)} verbose skill descriptions**: "
+            f"These skills have descriptions over 200 characters in their SKILL.md frontmatter: "
+            f"{', '.join(names)}{'...' if len(verbose) > 10 else ''}. "
+            f"The description field loads every session as part of the skill menu.\n"
+            f"  Tighten each to under 80 characters while keeping the core trigger phrase. "
+            f"The description helps Claude decide when to suggest the skill, so keep it specific: "
+            f"'Build client audit sites with editorial design' is better than a full paragraph. "
+            f"Move detailed usage instructions into the SKILL.md body (loaded only when invoked)."
+        )
+
+    # --- Rule 6: High command count ---
+    cmds = components.get("commands", {})
+    cmd_count = cmds.get("count", 0)
+    cmd_tokens = cmds.get("tokens", 0)
+    if cmd_count > 30:
+        quick.append(
+            f"**Archive unused commands ({cmd_count} commands, {cmd_tokens:,} tokens)**: "
+            f"You have {cmd_count} custom commands. Each adds ~50 tokens to the command menu, every session. "
+            f"Review the list and archive rarely-used commands to ~/.claude/commands/_archived/.\n"
+            f"  Good archive candidates: one-time setup commands, project-specific commands for finished projects, "
+            f"and commands superseded by skills. Keep: daily-use commands, automation triggers, "
+            f"and anything referenced in hooks or scripts."
+        )
+    elif cmd_count > 20:
+        medium.append(
+            f"**Review {cmd_count} commands ({cmd_tokens:,} tokens)**: "
+            f"Consider archiving rarely-used commands to ~/.claude/commands/_archived/ to reduce menu overhead."
+        )
+
+    # --- Rule 7: Model mix imbalance (requires trends) ---
+    if trends:
+        model_mix = trends.get("model_mix", {})
+        total_tokens = sum(model_mix.values()) if model_mix else 0
+        if total_tokens > 0:
+            opus_pct = model_mix.get("opus", 0) / total_tokens * 100
+            haiku_pct = model_mix.get("haiku", 0) / total_tokens * 100
+            if opus_pct > 50 and haiku_pct < 15:
+                habits.append(
+                    f"**Shift data-gathering work to Haiku ({opus_pct:.0f}% Opus, {haiku_pct:.0f}% Haiku)**: "
+                    f"Your model mix is heavily weighted toward Opus. For data-gathering agents "
+                    f"(file reads, counting, directory scans, grep searches), Haiku is 60x cheaper "
+                    f"and often just as accurate.\n"
+                    f"  Add to CLAUDE.md: 'Default subagents to model=\"haiku\" for data gathering, "
+                    f"model=\"sonnet\" for analysis and judgment calls. Reserve model=\"opus\" for "
+                    f"complex multi-step reasoning.' This doesn't save context tokens but significantly "
+                    f"reduces cost and rate limit consumption."
+                )
+
+    # --- Rule 8: No SessionEnd hook ---
+    hooks = components.get("hooks", {})
+    if not hooks.get("configured") or "SessionEnd" not in hooks.get("names", []):
+        habits.append(
+            "**Install SessionEnd hook for usage tracking**: "
+            "No SessionEnd hook detected. The hook auto-collects session data and regenerates "
+            "your dashboard after every session. Takes ~2 seconds, no background process.\n"
+            "  Run: python3 measure.py setup-hook\n"
+            "  This enables the Trends tab (which skills you actually use, model mix, daily patterns) "
+            "and the Health tab (stale sessions, version checks). Without it, you only get data "
+            "from manual 'measure.py collect' runs."
+        )
+
+    # --- Rule 9: Broken skill symlinks ---
+    skills_dir = CLAUDE_DIR / "skills"
+    broken_links = []
+    if skills_dir.exists():
+        for item in skills_dir.iterdir():
+            if item.is_symlink() and not item.exists():
+                broken_links.append(item.name)
+    if broken_links:
+        quick.append(
+            f"**Remove {len(broken_links)} broken skill symlinks**: "
+            f"These skill directories are broken symlinks pointing to deleted targets: "
+            f"{', '.join(broken_links)}. "
+            f"Claude Code still tries to parse them at startup, generating errors. "
+            f"Safe to delete: rm {' '.join(str(skills_dir / b) for b in broken_links)}"
+        )
+
+    # --- Rule 10: Rules directory overhead ---
+    rules = components.get("rules", {})
+    rules_count = rules.get("count", 0)
+    rules_tokens = rules.get("tokens", 0)
+    always_loaded = rules.get("always_loaded", 0)
+    if rules_count > 5 and rules_tokens > 300:
+        medium.append(
+            f"**Review {rules_count} rule files ({rules_tokens:,} tokens, {always_loaded} always-loaded)**: "
+            f"Files in .claude/rules/ without a paths: frontmatter field load every session regardless "
+            f"of which project you're in. Review whether all {always_loaded} always-loaded rules are still relevant.\n"
+            f"  Add 'paths:' frontmatter to scope rules to specific directories. "
+            f"Consolidate overlapping rules into fewer files. "
+            f"Archive stale rules (old project conventions, resolved style decisions)."
+        )
+
+    # --- Rule 11: @imports overhead ---
+    imports = components.get("imports", {})
+    imports_count = imports.get("count", 0)
+    imports_tokens = imports.get("tokens", 0)
+    if imports_count > 0 and imports_tokens > 500:
+        medium.append(
+            f"**Review @imports in CLAUDE.md ({imports_count} imports, {imports_tokens:,} tokens)**: "
+            f"Each @import pulls a file into every message. Total: {imports_tokens:,} tokens.\n"
+            f"  Ask for each import: does this need to load every single message? "
+            f"If it's a reference doc, coding standard, or config guide, consider converting it to "
+            f"a skill reference file (loaded only when invoked) or removing the @import and reading "
+            f"the file on demand. Keep imports only for content that genuinely affects every interaction."
+        )
+
+    # --- Rule 12: Large number of MCP tools ---
+    mcp = components.get("mcp_tools", {})
+    mcp_tokens = mcp.get("tokens", 0)
+    mcp_servers = mcp.get("server_count", 0)
+    if mcp_tokens > 2000:
+        medium.append(
+            f"**Review MCP server overhead ({mcp_servers} servers, ~{mcp_tokens:,} tokens)**: "
+            f"MCP tools add up. Each deferred tool costs ~15 tokens in the Tool Search menu, "
+            f"plus server instructions.\n"
+            f"  Review your MCP servers in settings.json. Disable servers you rarely use "
+            f"(you can re-enable anytime). Check for duplicate tools across servers. "
+            f"Note: ask yourself which servers you actually use in conversation before disabling. "
+            f"Some servers are used interactively even if they have no code references."
+        )
+
+    # --- Rule 13: Compact habits (always include) ---
+    habits.append(
+        "**Use /compact at 50-70% context fill**: "
+        "Output quality degrades as context fills, especially past 70%. "
+        "Don't wait for auto-compact. Run /compact proactively when you notice "
+        "the conversation getting long or when switching topics within a session."
+    )
+    habits.append(
+        "**Use /clear between unrelated topics**: "
+        "Each message re-sends your entire config stack. Starting fresh with /clear "
+        "gives you a clean context window without stale conversation history dragging down quality."
+    )
+    habits.append(
+        "**Batch related requests into one message**: "
+        "Every message round-trip re-sends your full config stack. "
+        "Instead of 5 separate messages, combine related requests into one. "
+        "This is especially impactful with large CLAUDE.md or many skills."
+    )
+
+    # --- Assemble markdown ---
+    sections = []
+    if quick:
+        sections.append("## Quick Wins\n\n" + "\n\n".join(
+            f"- [ ] {item}" for item in quick
+        ))
+    if medium:
+        sections.append("## Medium Effort\n\n" + "\n\n".join(
+            f"- [ ] {item}" for item in medium
+        ))
+    if deep:
+        sections.append("## Deep Optimization\n\n" + "\n\n".join(
+            f"- [ ] {item}" for item in deep
+        ))
+    if habits:
+        sections.append("## Behavioral Habits\n\n" + "\n\n".join(
+            f"- [ ] {item}" for item in habits
+        ))
+
+    plan_md = "\n\n".join(sections) if sections else ""
+    total_count = len(quick) + len(medium) + len(deep) + len(habits)
+    return plan_md, total_count
 
 
 def _find_all_jsonl_files(days=30):
@@ -1246,8 +1678,7 @@ def _clean_project_name(raw_project):
     if not raw_project:
         return "unknown"
     # Strip the leading "-Users-<username>-" prefix
-    import re as _re
-    cleaned = _re.sub(r"^-Users-[^-]+-?", "", raw_project)
+    cleaned = re.sub(r"^-Users-[^-]+-?", "", raw_project)
     if not cleaned:
         return "home"
     # Split remaining path segments and take the last 1-2 meaningful ones
@@ -1745,7 +2176,6 @@ def _collect_trends_from_db(days=30):
 
 def _query_trends_db(conn, days):
     """Internal: run all queries against the trends DB. Caller handles errors."""
-    from datetime import timedelta
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
     # Basic stats
@@ -2032,7 +2462,6 @@ def _collect_git_commits(days=30):
 
     Returns: { "2026-03-01": [{"repo": "name", "commits": ["msg1", ...]}], ... }
     """
-    from datetime import timedelta
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
     # Collect candidate repo paths
@@ -2247,10 +2676,9 @@ def _format_elapsed(seconds):
 def _find_session_version_for_pid(pid):
     """Try to find the Claude Code version for a running process by matching its session JSONL.
 
-    We look for recently modified JSONL files and check if their sessionId
-    matches anything we can correlate to the PID. Falls back to reading the
-    version field from the most recent JSONL that started around the process
-    start time.
+    We look for JSONL files whose first message timestamp is close to the
+    process start time. For long-running sessions, we also check file birth
+    time (macOS) or creation time as a secondary signal.
     """
     projects_base = CLAUDE_DIR / "projects"
     if not projects_base.exists():
@@ -2266,11 +2694,12 @@ def _find_session_version_for_pid(pid):
             return None
         lstart_str = result.stdout.strip()
         # Parse "Fri Feb 27 10:18:43 2026"
-        proc_start = datetime.strptime(lstart_str, "%c")
+        proc_start = datetime.strptime(lstart_str, "%a %b %d %H:%M:%S %Y")
+        proc_start_ts = proc_start.timestamp()
     except (subprocess.SubprocessError, ValueError, OSError):
         return None
 
-    # Find JSONL files modified around the process start time
+    # Find JSONL files whose creation or first-record timestamp matches process start
     best_match = None
     best_diff = float("inf")
 
@@ -2279,35 +2708,46 @@ def _find_session_version_for_pid(pid):
             continue
         for jf in project_dir.glob("*.jsonl"):
             try:
-                mtime = jf.stat().st_mtime
-                file_time = datetime.fromtimestamp(mtime)
-                # Only consider files modified after process start
-                if file_time < proc_start:
+                stat = jf.stat()
+                # Use birth time on macOS, fallback to ctime
+                birth_time = getattr(stat, "st_birthtime", stat.st_ctime)
+                # Skip files created well before or well after the process
+                if birth_time < proc_start_ts - 60 and stat.st_mtime < proc_start_ts - 60:
                     continue
-                # Read first few lines for version and timestamp
+
+                # Read first 10 lines for version and timestamp
+                version_found = None
                 with open(jf, "r", encoding="utf-8", errors="replace") as f:
                     for line_num, line in enumerate(f):
-                        if line_num > 5:
+                        if line_num > 10:
                             break
                         try:
                             record = json.loads(line)
+                            v = record.get("version")
+                            if v and not version_found:
+                                version_found = v
                             ts_str = record.get("timestamp")
                             if not ts_str:
                                 continue
                             ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).replace(tzinfo=None)
                             diff = abs((ts - proc_start).total_seconds())
-                            if diff < best_diff:
+                            if diff < best_diff and version_found:
                                 best_diff = diff
-                                v = record.get("version")
-                                if v:
-                                    best_match = v
+                                best_match = version_found
                         except (json.JSONDecodeError, ValueError):
                             continue
+
+                # Also try correlating birth time to process start
+                birth_diff = abs(birth_time - proc_start_ts)
+                if birth_diff < best_diff and version_found:
+                    best_diff = birth_diff
+                    best_match = version_found
+
             except (PermissionError, OSError):
                 continue
 
-    # Only return if we found a reasonable match (within 5 minutes of start)
-    if best_match and best_diff < 300:
+    # Return if we found a reasonable match (within 10 minutes of start)
+    if best_match and best_diff < 600:
         return best_match
     return None  # No confident match; don't guess (causes false OUTDATED flags)
 
@@ -2465,13 +2905,14 @@ def session_health():
 
 SETTINGS_PATH = CLAUDE_DIR / "settings.json"
 MEASURE_PY_PATH = Path(__file__).resolve()
-HOOK_COMMAND = f"python3 {MEASURE_PY_PATH} collect --quiet"
+HOOK_COMMAND = f"python3 '{MEASURE_PY_PATH}' collect --quiet && python3 '{MEASURE_PY_PATH}' dashboard --quiet"
 
 
 def _is_hook_installed(settings=None):
     """Check if the SessionEnd measure.py collect hook is installed.
 
     Returns True if any SessionEnd hook command contains 'measure.py collect'.
+    Recognizes both old (collect-only) and new (collect + dashboard) hook commands.
     """
     if settings is None:
         if not SETTINGS_PATH.exists():
@@ -2495,6 +2936,34 @@ def _is_hook_installed(settings=None):
     return False
 
 
+def _is_hook_current(settings=None):
+    """Check if the installed hook includes dashboard regeneration (new format).
+
+    Returns True if hook has both 'collect' and 'dashboard' in the command.
+    Returns False if only collect-only (old format) or not installed at all.
+    """
+    if settings is None:
+        if not SETTINGS_PATH.exists():
+            return False
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+        except (json.JSONDecodeError, PermissionError, OSError):
+            return False
+
+    hooks = settings.get("hooks", {})
+    session_end = hooks.get("SessionEnd", [])
+    if not isinstance(session_end, list):
+        return False
+    for entry in session_end:
+        hook_list = entry.get("hooks", []) if isinstance(entry, dict) else []
+        for hook in hook_list:
+            cmd = hook.get("command", "") if isinstance(hook, dict) else ""
+            if "measure.py" in cmd and "collect" in cmd and "dashboard" in cmd:
+                return True
+    return False
+
+
 def check_hook():
     """Exit 0 if SessionEnd measure.py collect hook is installed, 1 if not."""
     sys.exit(0 if _is_hook_installed() else 1)
@@ -2510,7 +2979,7 @@ def _write_settings_atomic(settings_data):
     )
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(settings_data, f, indent=2, ensure_ascii=False)
+            json.dump(settings_data, f, indent=2, ensure_ascii=True)
             f.write("\n")
         os.replace(tmp_path, str(SETTINGS_PATH))
     except Exception:
@@ -2523,7 +2992,7 @@ def _write_settings_atomic(settings_data):
 
 
 def setup_hook(dry_run=False):
-    """Install the SessionEnd hook for automatic usage collection."""
+    """Install the SessionEnd hook for automatic usage collection and dashboard refresh."""
     # Load existing settings
     settings = {}
     if SETTINGS_PATH.exists():
@@ -2534,25 +3003,40 @@ def setup_hook(dry_run=False):
             print(f"[Error] Could not read {SETTINGS_PATH}: {e}")
             sys.exit(1)
 
-    # Idempotency check
-    if _is_hook_installed(settings):
-        print("[Token Optimizer] SessionEnd hook already installed. Nothing to do.")
+    # Check if hook is installed and whether it needs upgrading
+    installed = _is_hook_installed(settings)
+    current = _is_hook_current(settings)
+
+    if installed and current:
+        print("[Token Optimizer] SessionEnd hook already installed and up to date. Nothing to do.")
         return
+
+    upgrading = installed and not current
 
     # Build the hook entry
     new_hook = {"type": "command", "command": HOOK_COMMAND}
 
-    # Handle 4 scenarios
     if "hooks" not in settings:
         settings["hooks"] = {}
 
     hooks = settings["hooks"]
-    if "SessionEnd" not in hooks:
+
+    if upgrading:
+        # Replace old collect-only hook with new collect+dashboard hook
+        session_end = hooks.get("SessionEnd", [])
+        if isinstance(session_end, list):
+            for entry in session_end:
+                hook_list = entry.get("hooks", []) if isinstance(entry, dict) else []
+                for i, hook in enumerate(hook_list):
+                    cmd = hook.get("command", "") if isinstance(hook, dict) else ""
+                    if "measure.py" in cmd and "collect" in cmd:
+                        hook_list[i] = new_hook
+                        break
+    elif "SessionEnd" not in hooks:
         hooks["SessionEnd"] = [{"hooks": [new_hook]}]
     else:
         session_end = hooks["SessionEnd"]
         if isinstance(session_end, list) and len(session_end) > 0:
-            # Append to the first entry's hooks array
             first_entry = session_end[0]
             if isinstance(first_entry, dict):
                 if "hooks" not in first_entry:
@@ -2564,9 +3048,13 @@ def setup_hook(dry_run=False):
             hooks["SessionEnd"] = [{"hooks": [new_hook]}]
 
     if dry_run:
-        print("[Token Optimizer] Dry run. Proposed SessionEnd hooks:\n")
+        action = "Upgrade" if upgrading else "Install"
+        print(f"[Token Optimizer] Dry run ({action}). Proposed SessionEnd hooks:\n")
         print(json.dumps(hooks.get("SessionEnd", []), indent=2))
-        print("\nNo changes written.")
+        print(f"\nThe hook will:")
+        print(f"  1. Collect session data into {SNAPSHOT_DIR / 'trends.db'}")
+        print(f"  2. Regenerate the persistent dashboard at {DASHBOARD_PATH}")
+        print(f"\nNo changes written.")
         return
 
     # Backup settings.json
@@ -2581,9 +3069,11 @@ def setup_hook(dry_run=False):
     # Write atomically
     try:
         _write_settings_atomic(settings)
-        print(f"[Token Optimizer] SessionEnd hook installed.")
+        action = "upgraded" if upgrading else "installed"
+        print(f"[Token Optimizer] SessionEnd hook {action}.")
         print(f"  Backup: {backup_path}")
-        print(f"  Hook: {HOOK_COMMAND}")
+        print(f"  Hook collects data + regenerates dashboard after each session.")
+        print(f"  Dashboard: {DASHBOARD_PATH}")
     except PermissionError:
         print(f"[Error] Permission denied writing {SETTINGS_PATH}.")
         print(f"Add this manually to your settings.json hooks.SessionEnd:\n")
@@ -2617,9 +3107,21 @@ if __name__ == "__main__":
                     sys.exit(1)
                 serve = True
         if not cp:
-            print("Usage: python3 measure.py dashboard --coord-path /tmp/token-optimizer-XXXXXXXXXX")
-            print("       python3 measure.py dashboard --coord-path PATH --serve [--port 8080]")
-            sys.exit(1)
+            # Standalone mode: Trends + Health only
+            days = 30
+            quiet = "--quiet" in args or "-q" in args
+            for i, a in enumerate(args):
+                if a == "--days" and i + 1 < len(args):
+                    try:
+                        days = int(args[i + 1])
+                    except ValueError:
+                        pass
+            out = generate_standalone_dashboard(days=days, quiet=quiet)
+            if out and serve:
+                _serve_dashboard(out, port=serve_port)
+            elif out and not quiet:
+                _open_in_browser(out)
+            sys.exit(0 if out else 1)
         out = generate_dashboard(cp)
         if serve:
             _serve_dashboard(out, port=serve_port)
@@ -2668,9 +3170,10 @@ if __name__ == "__main__":
         print("  python3 measure.py snapshot before      # Save pre-optimization snapshot")
         print("  python3 measure.py snapshot after       # Save post-optimization snapshot")
         print("  python3 measure.py compare              # Compare before vs after")
-        print("  python3 measure.py dashboard --coord-path PATH  # Interactive dashboard")
-        print("  python3 measure.py dashboard --coord-path PATH --serve  # Serve over HTTP (headless)")
-        print("  python3 measure.py dashboard --coord-path PATH --serve --port 9000  # Custom port")
+        print("  python3 measure.py dashboard                           # Standalone dashboard (Trends + Health)")
+        print("  python3 measure.py dashboard --coord-path PATH         # Full dashboard (after audit)")
+        print("  python3 measure.py dashboard --serve [--port 8080]     # Serve over HTTP (headless)")
+        print("  python3 measure.py dashboard --quiet                   # Regenerate silently (for hooks)")
         print("  python3 measure.py health               # Check running session health")
         print("  python3 measure.py trends               # Usage trends (last 30 days)")
         print("  python3 measure.py trends --days 7      # Usage trends (last 7 days)")
