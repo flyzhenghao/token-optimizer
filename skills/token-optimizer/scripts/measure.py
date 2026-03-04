@@ -2672,6 +2672,23 @@ def _find_subagent_jsonl_files(session_jsonl_path):
     return results
 
 
+def _detect_bash_skill_invocation(command):
+    """Detect skill execution from Bash tool command string.
+
+    Returns skill name if this is an actual skill script execution, None otherwise.
+    Uses positive matching (require execution verb) rather than exclusion lists.
+    """
+    # Pattern 1: execution verb + skills/<name>/scripts/
+    m = re.search(r"(python3?|node|npx|tsx|bash|sh)\s+.*skills/([\w-]+)/scripts/", command)
+    if m:
+        return m.group(2)
+    # Pattern 2: cd .../skills/<name> && (npx|node|tsx|python|bash|sh|./)
+    m = re.search(r"skills/([\w-]+)\s*&&\s*(npx|node|tsx|python3?|bash|sh|\.\/)", command)
+    if m:
+        return m.group(1)
+    return None
+
+
 def _extract_skills_and_agents_from_subagent(filepath):
     """Parse a subagent JSONL file for Skill and Task tool calls only.
 
@@ -2703,6 +2720,10 @@ def _extract_skills_and_agents_from_subagent(filepath):
                     elif tool_name == "Task":
                         agent_type = inp.get("subagent_type", "unknown")
                         subagents[agent_type] = subagents.get(agent_type, 0) + 1
+                    elif tool_name == "Bash":
+                        bash_skill = _detect_bash_skill_invocation(inp.get("command", ""))
+                        if bash_skill:
+                            skills[bash_skill] = skills.get(bash_skill, 0) + 1
     except (PermissionError, OSError):
         pass
     return skills, subagents
@@ -2867,6 +2888,10 @@ def _parse_session_jsonl(filepath):
                             elif tool_name == "Task":
                                 agent_type = inp.get("subagent_type", "unknown")
                                 subagents_used[agent_type] = subagents_used.get(agent_type, 0) + 1
+                            elif tool_name == "Bash":
+                                bash_skill = _detect_bash_skill_invocation(inp.get("command", ""))
+                                if bash_skill:
+                                    skills_used[bash_skill] = skills_used.get(bash_skill, 0) + 1
 
                     # Extract usage/token data
                     usage = msg.get("usage", {})
