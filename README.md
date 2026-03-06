@@ -378,6 +378,63 @@ Trends and health appear as dedicated tabs in both the persistent dashboard (`me
 
 The persistent dashboard defaults to the Trends tab and hides empty audit sections. The full audit dashboard shows all tabs. The right panel collapses on analytics tabs since they're informational, giving the data more room.
 
+## Coach Mode
+
+The audit tells you what's wrong with your current setup. Coach Mode tells you how to build things right from the start.
+
+```
+> /token-coach
+```
+
+One question: "What's your goal today?"
+
+- **Building something new**: Architecture guidance for skills, MCP servers, CLAUDE.md structure
+- **Existing setup feels slow**: Pattern detection with named anti-patterns and fix priorities
+- **Designing a multi-agent system**: Agent type selection, model routing, coordination patterns, cost math
+- **Quick health check**: Token Health Score (0-100) and top 3 actions
+
+Coach Mode is conversational, not a wall of text. It leads with your actual numbers, names the patterns it detects ("You've got the 50-Skill Trap going on"), asks follow-up questions, and generates a prioritized action plan with estimated token savings.
+
+### Token Health Score
+
+Every setup gets a 0-100 score based on detected patterns:
+
+```bash
+python3 $MEASURE_PY coach
+
+  Token Health Score: 78/100
+  Startup overhead: 18,200 tokens (9.1% of 200K)
+  Usable context: ~148,800 tokens
+
+  Issues detected:
+    [!!] Heavy CLAUDE.md: 1,450 tokens (target: <800)
+    [!]  Verbose Skill Descriptions: 5 skills over 200 chars
+
+  Good practices:
+    [OK] Reasonable Skill Count: 23 skills (2,300 tokens)
+    [OK] SessionEnd Hook Installed: Usage tracking active
+```
+
+The score and pattern analysis also appear as a dedicated **Coach tab** in the [dashboard](#interactive-dashboard).
+
+### What the coach knows
+
+The coaching knowledge base covers config optimization and agentic architecture:
+
+**8 named anti-patterns**: The 50-Skill Trap, The Opus Addiction, The CLAUDE.md Novel, The Import Avalanche, The MCP Sprawl, The Stale Memory, The Singleton Session, The Unscoped Rules. Each with symptoms, fix, and estimated savings.
+
+**Multi-agent design patterns**: Subagent cost model (each inherits your full config stack), coordination folder pattern, model routing table (Haiku for data-gathering, Sonnet for analysis, Opus for reasoning), built-in agent type selection (Explore vs Plan vs General-purpose), skill assignment costs (static, not progressive in subagents).
+
+**Hard numbers**: Baseline overhead breakdown, MCP tool costs (GitHub 26K eager vs 525 deferred), context quality degradation bands, environment variable reference, community benchmarks.
+
+### Coach data for scripts
+
+```bash
+python3 $MEASURE_PY coach --json          # Full JSON output
+python3 $MEASURE_PY coach --focus skills   # Focus on skill patterns
+python3 $MEASURE_PY coach --focus agentic  # Focus on multi-agent patterns
+```
+
 ## vs Alternatives
 
 | Tool | What It Does | Limitation |
