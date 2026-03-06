@@ -2,6 +2,16 @@
   <img src="skills/token-optimizer/assets/logo.svg" alt="Token Optimizer" width="780">
 </p>
 
+<p align="center">
+  <a href="https://github.com/alexgreensh/token-optimizer/releases"><img src="https://img.shields.io/badge/version-1.2.0-green" alt="Version 1.2.0"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer"><img src="https://img.shields.io/badge/Claude_Code-Plugin-blueviolet" alt="Claude Code Plugin"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer/blob/main/LICENSE"><img src="https://img.shields.io/github/license/alexgreensh/token-optimizer" alt="License"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer/stargazers"><img src="https://img.shields.io/github/stars/alexgreensh/token-optimizer" alt="GitHub Stars"></a>
+  <a href="https://github.com/alexgreensh/token-optimizer/commits/main"><img src="https://img.shields.io/github/last-commit/alexgreensh/token-optimizer" alt="Last Commit"></a>
+  <img src="https://img.shields.io/badge/python-3.8+-blue" alt="Python 3.8+">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey" alt="Platform">
+</p>
+
 <p align="center"><strong>Run <code>/context</code> on a fresh Claude Code session. See how much is already gone.<br>Find the ghost tokens, the invisible overhead, the context window tax. Get it back.</strong></p>
 
 ![Token Optimizer in action](skills/token-optimizer/assets/hero-terminal.svg)

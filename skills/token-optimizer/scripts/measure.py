@@ -673,6 +673,7 @@ def measure_components():
         "exists": settings_local.exists() or project_settings_local.exists(),
         "includeGitInstructions": _cached_settings.get("includeGitInstructions", True) if _cached_settings else True,
         "effortLevel": _cached_settings.get("effortLevel", None) if _cached_settings else None,
+        "defaultModel": _cached_settings.get("model", None) if _cached_settings else None,
     }
 
     # Skill frontmatter quality (collected during skills scan above)
@@ -1538,6 +1539,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
         )
 
     # --- Rule 7: Model mix imbalance (requires trends) ---
+    default_model = components.get("settings_local", {}).get("defaultModel")
     if trends:
         model_mix = trends.get("model_mix", {})
         total_tokens = sum(model_mix.values()) if model_mix else 0
@@ -1545,6 +1547,16 @@ def generate_auto_recommendations(components, trends=None, days=30):
             opus_pct = model_mix.get("opus", 0) / total_tokens * 100
             haiku_pct = model_mix.get("haiku", 0) / total_tokens * 100
             if opus_pct > 50 and haiku_pct < 15:
+                # Root cause detection: hardcoded model in settings.json
+                root_cause = ""
+                if default_model and "opus" in str(default_model).lower():
+                    root_cause = (
+                        f"\n  **Root cause**: Your settings.json has `\"model\": \"{default_model}\"` "
+                        f"which sets the default model for ALL operations. Even if CLAUDE.md has "
+                        f"routing instructions, subagents may inherit this default. "
+                        f"Remove the `\"model\"` key from settings.json and instead specify models "
+                        f"per-task in CLAUDE.md routing instructions."
+                    )
                 habits.append(
                     f"**Shift data-gathering work to Haiku ({opus_pct:.0f}% Opus, {haiku_pct:.0f}% Haiku)**: "
                     f"Your model mix is heavily weighted toward Opus. For data-gathering agents "
@@ -1553,7 +1565,7 @@ def generate_auto_recommendations(components, trends=None, days=30):
                     f"  Add to CLAUDE.md: 'Default subagents to model=\"haiku\" for data gathering, "
                     f"model=\"sonnet\" for analysis and judgment calls. Reserve model=\"opus\" for "
                     f"complex multi-step reasoning.' This doesn't save context tokens but significantly "
-                    f"reduces cost and rate limit consumption."
+                    f"reduces cost and rate limit consumption.{root_cause}"
                 )
 
     # --- Rule 8: No SessionEnd hook ---
@@ -1918,6 +1930,7 @@ def generate_coach_data(focus=None, components=None, trends=None):
         score -= 3
 
     # Check model mix from trends
+    default_model = components.get("settings_local", {}).get("defaultModel")
     if trends:
         model_mix = trends.get("model_mix", {})
         total_model_tokens = sum(model_mix.values()) if model_mix else 0
@@ -1925,11 +1938,14 @@ def generate_coach_data(focus=None, components=None, trends=None):
             opus_pct = model_mix.get("opus", 0) / total_model_tokens * 100
             haiku_pct = model_mix.get("haiku", 0) / total_model_tokens * 100
             if opus_pct > 70:
+                fix_msg = "Route data-gathering agents to Haiku, analysis to Sonnet"
+                if default_model and "opus" in str(default_model).lower():
+                    fix_msg += f". Root cause: settings.json has \"model\": \"{default_model}\" which may override routing"
                 patterns_bad.append({
                     "name": "Opus Addiction",
                     "severity": "medium",
                     "detail": f"{opus_pct:.0f}% Opus, {haiku_pct:.0f}% Haiku",
-                    "fix": "Route data-gathering agents to Haiku, analysis to Sonnet",
+                    "fix": fix_msg,
                     "savings": "50-75% cost reduction (same context, less spend)",
                 })
                 score -= 8
