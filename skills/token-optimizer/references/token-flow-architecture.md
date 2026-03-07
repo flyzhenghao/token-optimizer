@@ -78,7 +78,7 @@ MESSAGE SEND
 | - Budget warnings              ~100 tokens          |
 | - Tool-specific reminders      Variable             |
 |                                                     |
-| Can't control, but .claudeignore helps              |
+| Can't control, but permissions.deny rules help      |
 +-----------------------------------------------------+
     |
 +-----------------------------------------------------+
@@ -120,7 +120,7 @@ Skills (60):          6,000 tokens
 Commands (60):        3,000 tokens
 CLAUDE.md:            3,500 tokens  (250 lines. A 700-line file = 12K)
 MEMORY.md:            3,500 tokens
-System reminders:     3,000 tokens  (no .claudeignore)
+System reminders:     3,000 tokens  (no permissions.deny rules)
 ---------------------------------
 CONSUMED:            ~43,000 tokens (22% of 200K)
 + Autocompact buffer: 33,000 tokens (16.5%, reserved not consumed)
@@ -156,7 +156,7 @@ CONSUMED:            ~43,000 tokens (22% of 200K)
 | Component | Control Level | Optimization Method |
 |-----------|---------------|---------------------|
 | **Core system** | None | Fixed by Claude Code. Accept it. |
-| **System reminders** | Partial | Use .claudeignore to prevent file injection warnings. |
+| **System reminders** | Partial | Use `permissions.deny` rules to exclude files from context. |
 | **Tool definitions** | Partial | Tool Search defers most. Can't reduce further without disabling tools. |
 
 ---
@@ -206,7 +206,7 @@ System reminders are auto-injected by Claude Code when certain conditions occur:
 | Tool-specific context | Tool guidance | ~100-500 |
 
 ### How to Reduce
-- **Use .claudeignore**: Prevents modified file warnings for ignored files
+- **Use `permissions.deny`**: Exclude files from discovery and read operations
 - **Don't edit unnecessary files**: Each edit = potential injection
 - **Be aware**: You can't disable these entirely, but you can avoid triggering them
 
@@ -434,7 +434,7 @@ Skills (~60):         6,000 tokens
 Commands (~60):       3,000 tokens
 CLAUDE.md:            3,500 tokens (grown organically, never trimmed)
 MEMORY.md:            3,500 tokens (duplicates CLAUDE.md content)
-System reminders:     3,000 tokens (no .claudeignore)
+System reminders:     3,000 tokens (no permissions.deny rules)
 ---------------------------------
 CONSUMED:           ~43,000 tokens (22% of 200K)
 + Autocompact buffer: 33,000 tokens (16.5%, reserved)
@@ -449,7 +449,7 @@ Skills (~30):         3,000 tokens (archived 30)
 Commands (~25):       1,200 tokens (archived 35)
 CLAUDE.md:              800 tokens (progressive disclosure)
 MEMORY.md:            1,000 tokens (dedup'd with CLAUDE.md)
-System reminders:     1,000 tokens (.claudeignore)
+System reminders:     1,000 tokens (permissions.deny)
 ---------------------------------
 CONSUMED:           ~28,000 tokens (14% of 200K)
 + Autocompact buffer: 33,000 tokens (16.5%, reserved)
@@ -570,7 +570,7 @@ Full priority order for what Claude Code loads:
 13. System reminders (auto-injected)
 ```
 
-Items 1-5 are largely fixed or deferred. Items 6-12 are your optimization targets. Item 13 is partially controlled via .claudeignore.
+Items 1-5 are largely fixed or deferred. Items 6-12 are your optimization targets. Item 13 is partially controlled via `permissions.deny` rules.
 
 ### Settings.json Environment Variables (Token-Relevant)
 

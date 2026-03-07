@@ -88,7 +88,7 @@ Your 200K context window gets eaten from multiple directions:
 
 **MCP tools**: The biggest variable. Anthropic's own engineering team [measured 134K tokens consumed by tool definitions](https://www.anthropic.com/engineering/advanced-tool-use) before optimization. [Tool Search](https://www.anthropic.com/engineering/advanced-tool-use) (activates automatically when MCP tools exceed [~10% of context](https://code.claude.com/docs/en/costs)) reduced this by 85%, but MCP servers still add up: each deferred tool costs ~15 tokens, plus server instructions.
 
-**Your config stack** (what this tool optimizes): CLAUDE.md that's grown organically. MEMORY.md that duplicates half of it. 50+ skills you installed and forgot. Commands you never use. [`@imports`](https://code.claude.com/docs/en/memory) pulling in files you didn't realize. [`.claude/rules/`](https://code.claude.com/docs/en/memory) adding up quietly. No `.claudeignore` to block system reminder injection.
+**Your config stack** (what this tool optimizes): CLAUDE.md that's grown organically. MEMORY.md that duplicates half of it. 50+ skills you installed and forgot. Commands you never use. [`@imports`](https://code.claude.com/docs/en/memory) pulling in files you didn't realize. [`.claude/rules/`](https://code.claude.com/docs/en/memory) adding up quietly. No `permissions.deny` rules to exclude files from context.
 
 A real power user's baseline overhead: **~43,000 tokens** (22% of the 200K window). Add the autocompact buffer and **~38% is unavailable** before you type a single word.
 
@@ -111,7 +111,7 @@ Context used:          38% before your first message
 QUICK WINS
   Slim CLAUDE.md + MEMORY.md:      -5,200 tokens/msg
   Archive unused skills + commands: -4,800 tokens/msg
-  Prune MCP + add .claudeignore:    -5,000 tokens/msg
+  Prune MCP + add file exclusion:    -5,000 tokens/msg
 
 Total: ~15,000 tokens/msg recovered
 
@@ -129,7 +129,7 @@ Everything gets backed up before any change. You see diffs. You approve each fix
 | **Skills** | Unused skills still loading frontmatter (~100 tokens each). Duplicates. Archived skills in the wrong directory still loading. |
 | **MCP Servers** | Broken/unused servers. Duplicate tools across servers and plugins. Missing [Tool Search](https://www.anthropic.com/engineering/advanced-tool-use). |
 | **Commands** | Rarely-used commands inflating the menu (~50 tokens each). |
-| **Rules & Advanced** | [`.claude/rules/`](https://code.claude.com/docs/en/memory) overhead. Missing `.claudeignore`. No hooks. No monitoring. |
+| **Rules & Advanced** | [`.claude/rules/`](https://code.claude.com/docs/en/memory) overhead. Missing `permissions.deny` rules. No hooks. No monitoring. |
 
 ### The fix: progressive disclosure
 
@@ -474,7 +474,7 @@ skills/token-optimizer/
     token-flow-architecture.md         How Claude Code loads tokens
   examples/
     claude-md-optimized.md             Optimized CLAUDE.md template
-    claudeignore-template              .claudeignore starter
+    permissions-deny-template.json     permissions.deny starter
     hooks-starter.json                 Hook configuration example
   scripts/
     measure.py                         Measurement, trends, health & collection tool

@@ -2625,7 +2625,7 @@ function getSampleData() {
         imports: { count: 0, tokens: 0 },
         claude_local_md: { tokens: 0, exists: false },
         core_system: { tokens: 15000 },
-        claudeignore: { exists: true },
+        file_exclusion: { has_rules: true, global_deny_rules: ['Read(./.env)', 'Read(./.env.*)'], project_deny_rules: [] },
         hooks: { configured: true, names: ['SessionStart','PreCompact'] },
         settings_env: { found: {} },
         settings_local: { exists: true },
@@ -2810,8 +2810,8 @@ function getSampleData() {
       '- [ ] **Restructure MEMORY.md as index**: Current MEMORY.md is 185 lines of inline content, all loaded every session.\n' +
       '  Convert to an index of 1-line pointers to topic files (debugging.md, patterns.md, etc.).\n' +
       '  Topic files are only loaded on demand. Largest structural savings opportunity. ~1,200 tokens.\n\n' +
-      '- [ ] **Create .claudeignore for large files**: settings.local.json is 85KB and gets indexed by Claude Code.\n' +
-      '  Add it to .claudeignore along with other large non-code files.\n' +
+      '- [ ] **Add permissions.deny rules for large files**: settings.local.json is 85KB and gets indexed by Claude Code.\n' +
+      '  Add Read() deny patterns to .claude/settings.json to exclude large non-code files.\n' +
       '  Reduces file indexing overhead without affecting functionality. ~300 tokens.\n\n' +
       '- [ ] **Split CLAUDE.md into modular imports**: Separate identity, paths, rules, and project-specific sections into importable modules.\n' +
       '  Only the core module loads every session. Others load on demand via @imports.\n' +

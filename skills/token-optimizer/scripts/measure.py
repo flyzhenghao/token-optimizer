@@ -568,16 +568,20 @@ def measure_components():
         "note": mcp["note"],
     }
 
-    # .claudeignore (check both global and project-level)
-    global_ignore = CLAUDE_DIR / ".claudeignore"
-    project_ignore = cwd / ".claudeignore"
-    components["claudeignore"] = {
-        "global_exists": global_ignore.exists(),
-        "project_exists": project_ignore.exists(),
-        "exists": global_ignore.exists() or project_ignore.exists(),
-    }
+    # File exclusion rules (permissions.deny with Read() patterns)
+    def _extract_deny_read_rules(settings_obj):
+        """Extract Read() deny patterns from a settings object."""
+        if not settings_obj or not isinstance(settings_obj, dict):
+            return []
+        perms = settings_obj.get("permissions", {})
+        if not isinstance(perms, dict):
+            return []
+        deny = perms.get("deny", [])
+        if not isinstance(deny, list):
+            return []
+        return [r for r in deny if isinstance(r, str) and r.startswith("Read(")]
 
-    # Read settings.json once (used for hooks, env vars, MCP)
+    # Read settings.json once (used for hooks, env vars, MCP, file exclusion)
     settings_path = CLAUDE_DIR / "settings.json"
     _cached_settings = None
     if settings_path.exists():
@@ -586,6 +590,23 @@ def measure_components():
                 _cached_settings = json.load(f)
         except (json.JSONDecodeError, PermissionError, OSError):
             pass
+
+    # Check permissions.deny in global and project-level settings
+    global_deny_rules = _extract_deny_read_rules(_cached_settings)
+    project_settings_path = cwd / ".claude" / "settings.json"
+    _project_settings = None
+    if project_settings_path.exists():
+        try:
+            with open(project_settings_path, "r", encoding="utf-8") as f:
+                _project_settings = json.load(f)
+        except (json.JSONDecodeError, PermissionError, OSError):
+            pass
+    project_deny_rules = _extract_deny_read_rules(_project_settings)
+    components["file_exclusion"] = {
+        "global_deny_rules": global_deny_rules,
+        "project_deny_rules": project_deny_rules,
+        "has_rules": bool(global_deny_rules or project_deny_rules),
+    }
 
     # Hooks
     hooks_configured = False
@@ -697,7 +718,7 @@ def calculate_totals(components):
     fixed = 0
     # Keys that don't contribute direct token overhead (metadata only)
     non_token_keys = {
-        "claudeignore", "hooks", "settings_env", "settings_local",
+        "file_exclusion", "hooks", "settings_env", "settings_local",
         "skill_frontmatter_quality", "skills_detail",
     }
 
@@ -852,12 +873,20 @@ def print_snapshot_summary(snapshot):
         print(f"  (includes system reminders, conversation history, etc.)")
 
     # Extras
-    ignore = c.get("claudeignore", {})
+    exclusion = c.get("file_exclusion", {})
     hooks = c.get("hooks", {})
-    ignore_str = "Global" if ignore.get("global_exists") else ""
-    if ignore.get("project_exists"):
-        ignore_str += ("+Project" if ignore_str else "Project")
-    print(f"\n  .claudeignore: {ignore_str if ignore_str else 'MISSING'}")
+    g_rules = len(exclusion.get("global_deny_rules", []))
+    p_rules = len(exclusion.get("project_deny_rules", []))
+    total_rules = g_rules + p_rules
+    excl_str = f"{total_rules} deny rules" if total_rules else "NONE"
+    if total_rules:
+        parts = []
+        if g_rules:
+            parts.append(f"{g_rules} global")
+        if p_rules:
+            parts.append(f"{p_rules} project")
+        excl_str = f"{total_rules} deny rules ({', '.join(parts)})"
+    print(f"\n  File exclusion rules: {excl_str}")
     print(f"  Hooks: {', '.join(hooks.get('names', [])) if hooks.get('configured') else 'NONE'}")
 
     # Settings env vars
@@ -1015,8 +1044,12 @@ def compare_snapshots():
         print(f"\n  Context budget: {before_pct:.1f}% -> {after_pct:.1f}% of {ctx_label} window")
         print(f"  That's {total_saved:,} more tokens for actual work per message.")
 
-    # .claudeignore and hooks changes
-    print(f"\n  .claudeignore: {'MISSING' if not bc.get('claudeignore', {}).get('exists') else 'Yes'} -> {'MISSING' if not ac.get('claudeignore', {}).get('exists') else 'Yes'}")
+    # File exclusion and hooks changes
+    b_excl = bc.get("file_exclusion", {})
+    a_excl = ac.get("file_exclusion", {})
+    b_deny = len(b_excl.get("global_deny_rules", [])) + len(b_excl.get("project_deny_rules", []))
+    a_deny = len(a_excl.get("global_deny_rules", [])) + len(a_excl.get("project_deny_rules", []))
+    print(f"\n  File exclusion: {b_deny or 'No'} deny rules -> {a_deny or 'No'} deny rules")
     bh = bc.get("hooks", {})
     ah = ac.get("hooks", {})
     print(f"  Hooks: {'None' if not bh.get('configured') else ', '.join(bh.get('names', []))} -> {'None' if not ah.get('configured') else ', '.join(ah.get('names', []))}")
@@ -1488,16 +1521,16 @@ def generate_auto_recommendations(components, trends=None, days=30):
                 f"Consider archiving to ~/.claude/skills/_archived/. ~{overhead:,} tokens recoverable."
             )
 
-    # --- Rule 4: Missing .claudeignore ---
-    ignore = components.get("claudeignore", {})
-    if not ignore.get("exists"):
+    # --- Rule 4: Missing file exclusion rules ---
+    exclusion = components.get("file_exclusion", {})
+    if not exclusion.get("has_rules"):
         medium.append(
-            "**Create .claudeignore**: "
-            "No .claudeignore found in your project. Without it, Claude Code may inject system reminders "
-            "about large or binary files into your context window, wasting tokens on irrelevant content.\n"
-            "  Create .claudeignore in your project root (same syntax as .gitignore). Include: "
-            "build artifacts (dist/, node_modules/, .next/, __pycache__/), large data files, "
-            "generated files, logs, and anything you don't want Claude indexing. "
+            "**Add file exclusion rules**: "
+            "No permissions.deny rules found. Without them, Claude Code may access "
+            "large or sensitive files, wasting tokens on irrelevant content.\n"
+            "  Add Read() deny patterns to .claude/settings.json to exclude files from Claude's "
+            "context. Example: Read(./.env), Read(./build/**), Read(./dist/**), "
+            "Read(./node_modules/**), Read(./**/*.log). "
             "See the token-optimizer examples/ directory for a starter template."
         )
 
@@ -1874,15 +1907,15 @@ def generate_coach_data(focus=None, components=None, trends=None):
         })
         score -= 5
 
-    # Check .claudeignore
-    ignore = components.get("claudeignore", {})
-    if not ignore.get("exists"):
+    # Check file exclusion rules (permissions.deny)
+    exclusion = components.get("file_exclusion", {})
+    if not exclusion.get("has_rules"):
         patterns_bad.append({
-            "name": "Missing .claudeignore",
+            "name": "Missing file exclusion rules",
             "severity": "medium",
-            "detail": "No .claudeignore found",
-            "fix": "Create .claudeignore in project root",
-            "savings": "500-2,000 tokens (prevents system reminder injection)",
+            "detail": "No permissions.deny rules found",
+            "fix": "Add Read() deny patterns to .claude/settings.json",
+            "savings": "500-2,000 tokens (excludes files from context)",
         })
         score -= 8
 

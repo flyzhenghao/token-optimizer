@@ -324,10 +324,10 @@ Output file: {COORD_PATH}/audit/advanced.md
    - Prompt caching needs stable prefixes >1024 tokens, 5-min TTL
    - 90% cost reduction on cached content
 
-3. .claudeignore status:
-   - Check if ~/.claude/.claudeignore exists
-   - Check for project-level .claudeignore
-   - If missing: flag as HIGH PRIORITY
+3. File exclusion status:
+   - Check permissions.deny in ~/.claude/settings.json (global)
+   - Check permissions.deny in .claude/settings.json (project)
+   - If no Read() deny rules found: flag as HIGH PRIORITY
 
 4. Token monitoring:
    - Check if SessionEnd hook is installed for `measure.py collect` (the skill's own analytics)
@@ -425,9 +425,10 @@ Output file: {COORD_PATH}/audit/advanced.md
    **CLAUDE.md structure**: [Static-first / Mixed / Not optimized]
    **Issue**: [describe if volatile content breaks cache prefix]
 
-   ## .claudeignore
-   **Status**: [Exists / Missing]
-   **Coverage**: [Good / Needs expansion]
+   ## File Exclusion (permissions.deny)
+   **Status**: [Has rules / No rules]
+   **Global deny rules**: [count and patterns]
+   **Project deny rules**: [count and patterns]
 
    ## Token Monitoring
    **SessionEnd hook installed** (measure.py collect): [Yes / No]

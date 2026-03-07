@@ -59,14 +59,28 @@ Comprehensive checklist of ALL optimization techniques.
 
 ---
 
-### 5. .claudeignore Creation
-**Target**: Block unnecessary files from context injection
+### 5. File Exclusion Rules
+**Target**: Block unnecessary files from context via `permissions.deny`
 
-See `examples/claudeignore-template` for a ready-to-use template.
+See `examples/permissions-deny-template.json` for a ready-to-use template.
 
-Copy to `~/.claude/.claudeignore` (global) or `.claudeignore` (project-level).
+Add `permissions.deny` rules to `.claude/settings.json` (project-level) or `~/.claude/settings.json` (global):
 
-**Why**: Prevents system reminders from injecting modified files you don't need. Security + token savings.
+```json
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./node_modules/**)",
+      "Read(./dist/**)",
+      "Read(./**/*.log)"
+    ]
+  }
+}
+```
+
+**Why**: Files matching deny patterns are excluded from file discovery, search, and read operations. This is the official approach (replaces deprecated `ignorePatterns`). Security + token savings.
 
 **Expected savings**: Varies (500-2,000 tokens/msg if you frequently edit media/deps)
 
@@ -466,7 +480,7 @@ Also track with `/cost` at end of each session and `measure.py trends` for histo
 - Commands (~60): ~3,000 tokens
 - CLAUDE.md: ~3,500 tokens (grown organically, never trimmed)
 - MEMORY.md: ~3,500 tokens (duplicates CLAUDE.md content)
-- System reminders: ~3,000 tokens (no .claudeignore)
+- System reminders: ~3,000 tokens (no permissions.deny rules)
 - **Total consumed: ~43,000 tokens/msg (22% of 200K)**
 - **+ Autocompact buffer: ~33,000 tokens (16.5%, reserved)**
 - **= Total unavailable: ~76,000 tokens (38% of 200K)**
@@ -477,7 +491,7 @@ Also track with `/cost` at end of each session and `measure.py trends` for histo
 3. Skills: 60 -> 30 (30 archived, ~3,000 tokens saved)
 4. Commands: 60 -> 25 (35 archived, ~1,800 tokens saved)
 5. MCP: pruned unused servers (~3,000 tokens saved)
-6. .claudeignore created (~2,000 tokens saved from system reminders)
+6. permissions.deny rules added (~2,000 tokens saved from file exclusion)
 - **Config savings: ~15,000 tokens/msg (35% reduction in consumed overhead)**
 - **After consumed: ~28,000 tokens/msg (14% of 200K)**
 - **After unavailable (with buffer): ~61,000 tokens (30% of 200K)**

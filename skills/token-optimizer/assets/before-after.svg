@@ -123,7 +123,7 @@
     <text x="540" y="400" fill="#a6e3a1" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" text-anchor="end">1,200</text>
     <text x="680" y="400" fill="#a6e3a1" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" text-anchor="end">-1,800</text>
 
-    <!-- System reminders: 3,000 → 1,000 = -2,000 (with .claudeignore) -->
+    <!-- System reminders: 3,000 → 1,000 = -2,000 (with permissions.deny) -->
     <text x="60" y="424" fill="#bac2de" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13">System reminders</text>
     <text x="430" y="424" fill="#f9e2af" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" text-anchor="end">3,000</text>
     <text x="540" y="424" fill="#a6e3a1" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="13" text-anchor="end">1,000</text>

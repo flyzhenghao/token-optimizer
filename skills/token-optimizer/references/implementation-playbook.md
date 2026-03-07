@@ -66,13 +66,27 @@ List what will be archived, ask for confirmation before moving.
 
 ---
 
-## 4D: .claudeignore Creation
+## 4D: File Exclusion Rules
 
-If missing, create from the template in `examples/claudeignore-template`.
+If missing, add `permissions.deny` rules to `.claude/settings.json` (project-level) or `~/.claude/settings.json` (global). See `examples/permissions-deny-template.json` for a starter template.
 
-Copy to `~/.claude/.claudeignore` (global) or `.claudeignore` (project-level).
+```json
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./node_modules/**)",
+      "Read(./dist/**)",
+      "Read(./build/**)",
+      "Read(./**/*.log)"
+    ]
+  }
+}
+```
 
-**Why**: Prevents system reminders from injecting modified files you don't need. Security + token savings.
+**Why**: Files matching deny patterns are excluded from file discovery, search, and read operations. This is the officially supported approach (replaces deprecated `ignorePatterns`). Security + token savings.
 
 ---
 

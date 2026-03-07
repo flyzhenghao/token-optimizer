@@ -161,7 +161,7 @@ Dispatch 6 agents in parallel (single message, multiple Task calls):
 | Skills Auditor | `audit/skills.md` | Count, frontmatter overhead, duplicates |
 | MCP Auditor | `audit/mcp.md` | Deferred tools, broken/unused servers |
 | Commands Auditor | `audit/commands.md` | Count, menu overhead |
-| Settings & Advanced | `audit/advanced.md` | Hooks, rules, settings, @imports, .claudeignore, caching, monitoring |
+| Settings & Advanced | `audit/advanced.md` | Hooks, rules, settings, @imports, file exclusion, caching, monitoring |
 
 Pass `COORD_PATH` to each agent. Wait for all to complete.
 
@@ -212,7 +212,7 @@ If all implemented: ~X tokens/msg saved (~Y% reduction)
 
 Ready to implement? I can:
 1. Auto-fix safe changes (consolidate CLAUDE.md, archive skills)
-2. Generate .claudeignore (if missing)
+2. Generate permissions.deny rules (if missing)
 3. Create optimized CLAUDE.md template
 4. Show MCP servers to disable
 
@@ -248,7 +248,7 @@ For headless/remote servers, the user can run `python3 $MEASURE_PY dashboard --c
 
 Read `references/implementation-playbook.md` for detailed steps.
 
-Available actions: 4A (CLAUDE.md), 4B (MEMORY.md), 4C (Skills), 4D (.claudeignore), 4E (MCP), 4F (Hooks), 4G (Cache Structure), 4H (Rules Cleanup), 4I (Settings Tuning), 4J (Skill Description Tightening), 4K (Compact Instructions Setup), 4L (Model Routing Setup).
+Available actions: 4A (CLAUDE.md), 4B (MEMORY.md), 4C (Skills), 4D (File Exclusion), 4E (MCP), 4F (Hooks), 4G (Cache Structure), 4H (Rules Cleanup), 4I (Settings Tuning), 4J (Skill Description Tightening), 4K (Compact Instructions Setup), 4L (Model Routing Setup).
 
 Templates in `examples/`. Always backup before changes. Present diffs for approval.
 

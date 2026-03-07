@@ -134,7 +134,7 @@
       keyTimes="0;0.60;0.63;0.84;0.88;1"
       dur="16s" repeatCount="indefinite"/>
     <text fill="#bac2de" font-family="'SF Mono','Fira Code','Cascadia Code','Consolas',monospace" font-size="14">
-      <tspan x="28" y="404">&#xB7; Add .claudeignore + hooks: </tspan><tspan fill="#a6e3a1"> Save ~2,000 tokens/msg</tspan>
+      <tspan x="28" y="404">&#xB7; Add file exclusion + hooks:</tspan><tspan fill="#a6e3a1"> Save ~2,000 tokens/msg</tspan>
     </text>
   </g>
 

@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./**/credentials.json)",
+      "Read(./**/service-account*.json)",
+      "Read(./**/*.key)",
+      "Read(./**/*.pem)",
+      "Read(./node_modules/**)",
+      "Read(./.venv/**)",
+      "Read(./dist/**)",
+      "Read(./build/**)",
+      "Read(./.next/**)",
+      "Read(./**/__pycache__/**)",
+      "Read(./**/*.sqlite)",
+      "Read(./**/*.db)",
+      "Read(./**/*.log)",
+      "Read(./coverage/**)"
+    ]
+  }
+}
