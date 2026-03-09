@@ -16,6 +16,29 @@
 
 ![Token Optimizer in action](skills/token-optimizer/assets/hero-terminal.svg)
 
+---
+
+### NEW in v2.0: Active Session Intelligence
+
+v1.x found the ghost tokens. v2.0 protects your sessions from the inside.
+
+| Capability | What It Does |
+|-----------|-------------|
+| **Smart Compaction** | Checkpoints decisions, errors, and agent state before auto-compact fires. Restores what the summary dropped. Your "why" survives. |
+| **Context Quality Scoring** | Six-signal analysis (stale reads, bloated results, duplicates, compaction depth, decision density, agent efficiency). Tells you when to `/compact`, not just how full you are. |
+| **Session Continuity** | Automatic checkpoints on session end, `/clear`, and crashes. New sessions pick up where you left off via keyword-matched context injection. |
+
+All three work together: quality score triggers compaction advice, smart compact captures state before it fires, continuity restores it in your next session. Zero external dependencies. Plain markdown checkpoints. Setup in one command:
+
+```bash
+python3 $MEASURE_PY setup-smart-compact
+python3 $MEASURE_PY quality current
+```
+
+[Full v2.0 docs below.](#v20-active-session-intelligence)
+
+---
+
 ## Install
 
 ### Plugin (recommended)
@@ -545,7 +568,6 @@ skills/token-optimizer/
     implementation-playbook.md         Fix implementation details (4A-4N)
     optimization-checklist.md          32 optimization techniques
     token-flow-architecture.md         How Claude Code loads tokens
-    roadmap.md                         v2.1-v2.2 planned features
   examples/
     claude-md-optimized.md             Optimized CLAUDE.md template
     permissions-deny-template.json     permissions.deny starter
