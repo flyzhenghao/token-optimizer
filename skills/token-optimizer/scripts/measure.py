@@ -5507,22 +5507,29 @@ QUALITY_CACHE_DIR = CLAUDE_DIR / "token-optimizer"
 QUALITY_CACHE_PATH = QUALITY_CACHE_DIR / "quality-cache.json"
 
 
-def quality_cache(throttle_seconds=120, warn_threshold=70, quiet=False):
+def quality_cache(throttle_seconds=120, warn_threshold=70, quiet=False, session_jsonl=None):
     """Run quality analysis and write score to cache file for status line.
 
     Skips analysis if cache is younger than throttle_seconds.
+    Args:
+        session_jsonl: Path string to the session JSONL (from hook transcript_path).
+                       If provided, used directly instead of guessing by mtime.
     Returns the quality score, or None if skipped/failed.
     """
+    # Resolve the session file: prefer explicit path, fall back to mtime guess
+    if session_jsonl:
+        filepath = Path(session_jsonl) if Path(session_jsonl).exists() else None
+    else:
+        filepath = _find_current_session_jsonl()
+
     # Throttle: skip if cache is recent enough AND still on same session
     if QUALITY_CACHE_PATH.exists():
         try:
             age = time.time() - QUALITY_CACHE_PATH.stat().st_mtime
             if age < throttle_seconds:
-                # Check for session boundary before honoring throttle
-                current_fp = _find_current_session_jsonl()
                 try:
                     cached = json.loads(QUALITY_CACHE_PATH.read_text(encoding="utf-8"))
-                    if str(current_fp) == cached.get("session_file"):
+                    if str(filepath) == cached.get("session_file"):
                         # Same session - throttle is valid
                         if not quiet:
                             return cached.get("score")
@@ -5533,8 +5540,6 @@ def quality_cache(throttle_seconds=120, warn_threshold=70, quiet=False):
         except OSError:
             pass
 
-    # Find current session JSONL
-    filepath = _find_current_session_jsonl()
     if not filepath:
         return None
 
@@ -5921,7 +5926,15 @@ if __name__ == "__main__":
                     warn_threshold = int(args[i + 1])
                 except ValueError:
                     pass
-        score = quality_cache(throttle_seconds=throttle, warn_threshold=warn_threshold, quiet=quiet)
+        # Read hook payload from stdin if available (provides exact transcript_path)
+        session_jsonl = None
+        if not sys.stdin.isatty():
+            try:
+                payload = json.loads(sys.stdin.read())
+                session_jsonl = payload.get("transcript_path")
+            except (json.JSONDecodeError, OSError):
+                pass
+        score = quality_cache(throttle_seconds=throttle, warn_threshold=warn_threshold, quiet=quiet, session_jsonl=session_jsonl)
         if warn and score is not None and score < warn_threshold:
             if score < 50:
                 print(f"[Token Optimizer] Context quality: {score}/100 (critical). Heavy rot detected. Consider /clear with checkpoint.")
