@@ -5546,7 +5546,30 @@ def quality_cache(throttle_seconds=120, warn_threshold=70, quiet=False, session_
     # Run quality analysis
     quality_data = _parse_jsonl_for_quality(filepath)
     if not quality_data:
-        return None
+        # New/empty session - write a clean score to cache so stale score doesn't persist
+        result = {
+            "score": 100,
+            "signals": {},
+            "breakdown": {},
+            "total_messages": 0,
+            "decisions_found": 0,
+            "compactions": 0,
+            "turns": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "session_file": str(filepath),
+        }
+        QUALITY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=str(QUALITY_CACHE_DIR), suffix=".json")
+            with os.fdopen(fd, "w") as f:
+                json.dump(result, f)
+            os.replace(tmp_path, str(QUALITY_CACHE_PATH))
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        return 100
 
     result = compute_quality_score(quality_data)
     result["total_messages"] = len(quality_data["messages"])
