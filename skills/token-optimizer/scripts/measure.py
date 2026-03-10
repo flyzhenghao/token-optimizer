@@ -474,6 +474,8 @@ def measure_components():
     skill_names = []
     verbose_skills = []
     skills_detail = {}
+    skill_name_to_dir = {}   # SKILL.md name -> directory name (for usage matching)
+    skill_dir_to_name = {}   # directory name -> SKILL.md name
     if skills_dir.exists():
         for item in sorted(skills_dir.iterdir()):
             skill_md = item / "SKILL.md"
@@ -500,7 +502,7 @@ def measure_components():
                     detail["files"] = children
                 except OSError:
                     detail["files"] = []
-                # Read description from frontmatter or first paragraph
+                # Read name + description from frontmatter or first paragraph
                 try:
                     with open(skill_md, "r", encoding="utf-8") as f:
                         content = f.read(4000)  # first 4K is enough
@@ -510,7 +512,13 @@ def measure_components():
                             fm_block = content[3:end]
                             for line in fm_block.split("\n"):
                                 stripped = line.strip()
-                                if stripped.startswith("description:"):
+                                if stripped.startswith("name:"):
+                                    fm_name = stripped[5:].strip().strip('"').strip("'")
+                                    if fm_name and fm_name != item.name:
+                                        detail["skill_name"] = fm_name
+                                        skill_name_to_dir[fm_name] = item.name
+                                        skill_dir_to_name[item.name] = fm_name
+                                elif stripped.startswith("description:"):
                                     desc_text = stripped[12:].strip().strip("|").strip(">").strip()
                                     if not desc_text:
                                         # Multi-line description
@@ -522,7 +530,6 @@ def measure_components():
                                                 break
                                         desc_text = " ".join(desc_lines)
                                     detail["description"] = desc_text[:200]
-                                    break
                     # Fallback: no YAML frontmatter, grab first non-heading paragraph
                     if "description" not in detail:
                         for line in content.split("\n"):
@@ -537,6 +544,8 @@ def measure_components():
         "count": skill_count,
         "tokens": skill_tokens,
         "names": skill_names,
+        "name_to_dir": skill_name_to_dir,
+        "dir_to_name": skill_dir_to_name,
     }
     components["skills_detail"] = skills_detail
 
@@ -1203,6 +1212,72 @@ def _serve_dashboard(filepath, port=8080):
                 return
             super().do_HEAD()
 
+        def do_POST(self):
+            """Handle API requests for skill/MCP management."""
+            path = self.path.split("?")[0]
+
+            # Read JSON body
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = {}
+            if content_len > 0:
+                try:
+                    body = json.loads(self.rfile.read(content_len))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            name = body.get("name", "")
+            if not name:
+                self._json_response(400, {"error": "Missing 'name' field"})
+                return
+
+            ok = False
+            msg = ""
+            if path == "/api/skill/archive":
+                ok = _manage_skill("archive", name)
+                msg = f"Archived skill: {name}" if ok else f"Failed to archive: {name}"
+            elif path == "/api/skill/restore":
+                ok = _manage_skill("restore", name)
+                msg = f"Restored skill: {name}" if ok else f"Failed to restore: {name}"
+            elif path == "/api/mcp/disable":
+                ok = _manage_mcp("disable", name)
+                msg = f"Disabled MCP server: {name}" if ok else f"Failed to disable: {name}"
+            elif path == "/api/mcp/enable":
+                ok = _manage_mcp("enable", name)
+                msg = f"Enabled MCP server: {name}" if ok else f"Failed to enable: {name}"
+            else:
+                self._json_response(404, {"error": "Unknown endpoint"})
+                return
+
+            # After state change, regenerate dashboard data for the manage tab
+            fresh_manage = None
+            if ok:
+                try:
+                    fresh_manage = _collect_management_data()
+                except Exception:
+                    pass
+
+            self._json_response(
+                200 if ok else 500,
+                {"ok": ok, "message": msg, "manage": fresh_manage}
+            )
+
+        def _json_response(self, code, data):
+            body = json.dumps(data, default=str).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_OPTIONS(self):
+            """Handle CORS preflight."""
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+
     print(f"\n  Serving dashboard at:")
     print(f"    http://localhost:{port}/")
     print(f"\n  Press Ctrl+C to stop.\n")
@@ -1370,6 +1445,219 @@ def _collect_hook_status_for_dashboard():
     }
 
 
+def _collect_management_data(components=None, trends=None):
+    """Collect data for the Manage tab: active/archived skills, MCP servers."""
+    if components is None:
+        components = measure_components()
+
+    mp = str(Path(__file__).resolve())
+    skills_dir = CLAUDE_DIR / "skills"
+    backups_dir = CLAUDE_DIR / "_backups"
+
+    # Active skills
+    active_skills = []
+    skills_detail = components.get("skills_detail", {})
+    for name in sorted(components.get("skills", {}).get("names", [])):
+        sd = skills_detail.get(name, {})
+        active_skills.append({
+            "name": name,
+            "skill_name": sd.get("skill_name", name),
+            "tokens": sd.get("frontmatter_tokens", 100),
+            "description": sd.get("description", ""),
+            "archive_cmd": f"python3 '{mp}' skill archive {name}",
+        })
+
+    # Archived skills (scan backup dirs)
+    archived_skills = []
+    if backups_dir.exists():
+        for archive_dir in sorted(backups_dir.iterdir(), reverse=True):
+            if not archive_dir.is_dir() or not archive_dir.name.startswith("skills-archived"):
+                continue
+            date_part = archive_dir.name.replace("skills-archived-", "").replace("skills-archived", "")
+            for item in sorted(archive_dir.iterdir()):
+                if item.is_dir() and (item / "SKILL.md").exists():
+                    desc = ""
+                    try:
+                        content = (item / "SKILL.md").read_text(encoding="utf-8")[:2000]
+                        if content.startswith("---"):
+                            end = content.find("---", 3)
+                            if end > 0:
+                                for line in content[3:end].split("\n"):
+                                    if line.strip().startswith("description:"):
+                                        desc = line.strip()[12:].strip()[:100]
+                                        break
+                    except OSError:
+                        pass
+                    archived_skills.append({
+                        "name": item.name,
+                        "archived_date": date_part,
+                        "archive_dir": archive_dir.name,
+                        "description": desc,
+                        "restore_cmd": f"python3 '{mp}' skill restore {item.name}",
+                    })
+
+    # MCP servers (local settings.json)
+    settings, _ = _read_settings_json()
+    mcp_servers_config = settings.get("mcpServers", {})
+    disabled_config = settings.get("_disabledMcpServers", {})
+
+    active_mcps = []
+    for name in sorted(mcp_servers_config.keys()):
+        cfg = mcp_servers_config[name]
+        tool_count = len(cfg.get("tools", []))
+        active_mcps.append({
+            "name": name,
+            "source": "local",
+            "tool_count": tool_count,
+            "command": cfg.get("command", ""),
+            "disable_cmd": f"python3 '{mp}' mcp disable {name}",
+        })
+
+    disabled_mcps = []
+    for name in sorted(disabled_config.keys()):
+        disabled_mcps.append({
+            "name": name,
+            "source": "local",
+            "enable_cmd": f"python3 '{mp}' mcp enable {name}",
+        })
+
+    # Cloud-synced MCP servers (Claude Desktop config)
+    cloud_mcps = []
+    desktop_config = HOME / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    if desktop_config.exists():
+        try:
+            dc = json.loads(desktop_config.read_text(encoding="utf-8"))
+            for name in sorted(dc.get("mcpServers", {}).keys()):
+                if name not in mcp_servers_config and name not in disabled_config:
+                    cfg = dc["mcpServers"][name]
+                    cloud_mcps.append({
+                        "name": name,
+                        "source": "cloud",
+                        "command": cfg.get("command", ""),
+                    })
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return {
+        "skills": {
+            "active": active_skills,
+            "archived": archived_skills,
+        },
+        "mcp_servers": {
+            "active": active_mcps,
+            "disabled": disabled_mcps,
+            "cloud": cloud_mcps,
+        },
+    }
+
+
+def _manage_skill(action, name):
+    """Archive or restore a skill."""
+    skills_dir = CLAUDE_DIR / "skills"
+    backups_dir = CLAUDE_DIR / "_backups"
+    today = datetime.now().strftime("%Y%m%d")
+    archive_dir = backups_dir / f"skills-archived-{today}"
+
+    if action == "archive":
+        src = skills_dir / name
+        if not src.exists():
+            print(f"  Skill '{name}' not found in {skills_dir}")
+            return False
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        dst = archive_dir / name
+        src.rename(dst)
+        print(f"  Archived: {name} -> {archive_dir.name}/")
+        return True
+
+    elif action == "restore":
+        # Search all archive dirs for this skill
+        if backups_dir.exists():
+            for ad in sorted(backups_dir.iterdir(), reverse=True):
+                if not ad.is_dir() or not ad.name.startswith("skills-archived"):
+                    continue
+                src = ad / name
+                if src.exists():
+                    dst = skills_dir / name
+                    if dst.exists():
+                        print(f"  Skill '{name}' already exists in skills/. Remove it first.")
+                        return False
+                    src.rename(dst)
+                    print(f"  Restored: {name} from {ad.name}/")
+                    # Clean up empty archive dir
+                    try:
+                        remaining = list(ad.iterdir())
+                        if not remaining:
+                            ad.rmdir()
+                    except OSError:
+                        pass
+                    return True
+        print(f"  Skill '{name}' not found in any archive directory.")
+        return False
+    else:
+        print(f"  Unknown action: {action}")
+        return False
+
+
+def _manage_mcp(action, name):
+    """Disable or enable an MCP server by moving between mcpServers and _disabledMcpServers."""
+    settings, settings_path = _read_settings_json()
+    if not settings_path:
+        print("  Could not find settings.json")
+        return False
+
+    active = settings.get("mcpServers", {})
+    disabled = settings.get("_disabledMcpServers", {})
+
+    if action == "disable":
+        if name not in active:
+            print(f"  MCP server '{name}' not found in active servers.")
+            return False
+        config = active.pop(name)
+        disabled[name] = config
+        settings["_disabledMcpServers"] = disabled
+        settings["mcpServers"] = active
+        _write_settings_json(settings, settings_path)
+        print(f"  Disabled MCP server: {name}")
+        return True
+
+    elif action == "enable":
+        if name not in disabled:
+            print(f"  MCP server '{name}' not found in disabled servers.")
+            return False
+        config = disabled.pop(name)
+        active[name] = config
+        settings["mcpServers"] = active
+        if disabled:
+            settings["_disabledMcpServers"] = disabled
+        else:
+            settings.pop("_disabledMcpServers", None)
+        _write_settings_json(settings, settings_path)
+        print(f"  Enabled MCP server: {name}")
+        return True
+    else:
+        print(f"  Unknown action: {action}")
+        return False
+
+
+def _write_settings_json(settings, settings_path):
+    """Write settings.json atomically."""
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=str(Path(settings_path).parent), suffix=".json"
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp_path, settings_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def generate_standalone_dashboard(days=30, quiet=False):
     """Generate a persistent Trends + Health dashboard (no audit data needed).
 
@@ -1432,6 +1720,11 @@ def generate_standalone_dashboard(days=30, quiet=False):
     # Collect hook installation status for dashboard toggles
     hook_status = _collect_hook_status_for_dashboard()
 
+    # Collect management data for Manage tab
+    if not quiet:
+        print("  Collecting management data...")
+    management = _collect_management_data(components=components, trends=trends)
+
     data = {
         "snapshot": snapshot,
         "audit": {},
@@ -1440,6 +1733,7 @@ def generate_standalone_dashboard(days=30, quiet=False):
         "health": health,
         "coach": coach,
         "quality": quality,
+        "manage": management,
         "hooks": hook_status,
         "standalone": True,
         "auto_plan": True,
@@ -2791,10 +3085,20 @@ def _query_trends_db(conn, days):
             pass
     total_tools = dict(sorted(total_tools.items(), key=lambda x: -x[1]))
 
-    # Installed skills vs used
+    # Installed skills vs used (normalize names: usage logs use SKILL.md name, install list uses dir name)
     components = measure_components()
     installed_skills = set(components.get("skills", {}).get("names", []))
-    used_skills = set(skill_sessions.keys())
+    name_to_dir = components.get("skills", {}).get("name_to_dir", {})
+    used_skills_raw = set(skill_sessions.keys())
+    # Map used skill names to directory names where possible
+    used_skills = set()
+    for s in used_skills_raw:
+        if s in installed_skills:
+            used_skills.add(s)
+        elif s in name_to_dir:
+            used_skills.add(name_to_dir[s])
+        else:
+            used_skills.add(s)  # keep as-is for unresolved
     never_used = installed_skills - used_skills
     never_used_overhead = len(never_used) * TOKENS_PER_SKILL_APPROX
 
@@ -2944,7 +3248,16 @@ def _collect_trends_from_jsonl(days=30):
 
     components = measure_components()
     installed_skills = set(components.get("skills", {}).get("names", []))
-    used_skills = set(total_skills.keys())
+    name_to_dir = components.get("skills", {}).get("name_to_dir", {})
+    used_skills_raw = set(total_skills.keys())
+    used_skills = set()
+    for s in used_skills_raw:
+        if s in installed_skills:
+            used_skills.add(s)
+        elif s in name_to_dir:
+            used_skills.add(name_to_dir[s])
+        else:
+            used_skills.add(s)
     never_used = installed_skills - used_skills
     never_used_overhead = len(never_used) * TOKENS_PER_SKILL_APPROX
 
@@ -5644,6 +5957,24 @@ if __name__ == "__main__":
                 print(f"[Error] Unknown flag: {args[i]}")
                 sys.exit(1)
         usage_trends(days=days, as_json=output_json)
+    elif args[0] == "skill" and len(args) >= 3:
+        action = args[1]  # archive or restore
+        name = args[2]
+        if action in ("archive", "restore"):
+            ok = _manage_skill(action, name)
+            sys.exit(0 if ok else 1)
+        else:
+            print(f"  Unknown skill action: {action}. Use 'archive' or 'restore'.")
+            sys.exit(1)
+    elif args[0] == "mcp" and len(args) >= 3:
+        action = args[1]  # disable or enable
+        name = args[2]
+        if action in ("disable", "enable"):
+            ok = _manage_mcp(action, name)
+            sys.exit(0 if ok else 1)
+        else:
+            print(f"  Unknown mcp action: {action}. Use 'disable' or 'enable'.")
+            sys.exit(1)
     else:
         print("Usage:")
         print("  python3 measure.py report              # Full report")
@@ -5689,6 +6020,10 @@ if __name__ == "__main__":
         print("  python3 measure.py setup-quality-bar --dry-run      # Preview what would be installed")
         print("  python3 measure.py setup-quality-bar --status       # Check installation status")
         print("  python3 measure.py setup-quality-bar --uninstall    # Remove quality bar")
+        print("  python3 measure.py skill archive SKILL_NAME        # Archive a skill (move to backups)")
+        print("  python3 measure.py skill restore SKILL_NAME        # Restore an archived skill")
+        print("  python3 measure.py mcp disable SERVER_NAME         # Disable an MCP server")
+        print("  python3 measure.py mcp enable SERVER_NAME          # Re-enable a disabled MCP server")
         print("  python3 measure.py setup-daemon            # Install persistent dashboard server (macOS)")
         print("  python3 measure.py setup-daemon --dry-run  # Show what would be installed")
         print("  python3 measure.py setup-daemon --uninstall # Remove dashboard daemon")
