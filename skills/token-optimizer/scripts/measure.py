@@ -61,7 +61,9 @@ TOKENS_PER_DEFERRED_TOOL = 15
 # Tokens per eagerly-loaded MCP tool (full schema in system prompt)
 TOKENS_PER_EAGER_TOOL = 150
 # Average tools per MCP server (rough estimate when tool count unknown)
-AVG_TOOLS_PER_SERVER = 8
+AVG_TOOLS_PER_SERVER = 10
+# Overhead per CLAUDE.md file injection (XML wrapper + headers + disclaimer)
+CLAUDE_MD_INJECTION_OVERHEAD = 75
 
 
 def estimate_tokens_from_file(filepath):
@@ -386,6 +388,73 @@ def _get_frontmatter_description_length(filepath):
         return 0
 
 
+def _scan_plugin_skills_and_commands():
+    """Scan installed plugins for skills and commands not in ~/.claude/skills/ or ~/.claude/commands/."""
+    registry = CLAUDE_DIR / "plugins" / "installed_plugins.json"
+    result = {
+        "plugin_skill_count": 0, "plugin_skill_tokens": 0, "plugin_skill_names": [],
+        "plugin_cmd_count": 0, "plugin_cmd_tokens": 0, "plugin_cmd_names": [],
+        "plugins_found": [],
+    }
+    if not registry.exists():
+        return result
+    try:
+        with open(registry, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, PermissionError, OSError):
+        return result
+
+    plugins = data.get("plugins") or {}
+    if not isinstance(plugins, dict):
+        return result
+    seen_paths = set()
+    for plugin_key, installs in plugins.items():
+        if not isinstance(installs, list):
+            continue
+        plugin_name = plugin_key.split("@")[0] or plugin_key
+        for install in installs:
+            raw_path = install.get("installPath") or ""
+            if not raw_path:
+                continue
+            install_path = Path(raw_path)
+            if not install_path.is_absolute() or not install_path.exists():
+                continue
+            resolved = install_path.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
+            if plugin_name not in result["plugins_found"]:
+                result["plugins_found"].append(plugin_name)
+
+            try:
+                # Skills
+                skills_dir = install_path / "skills"
+                if skills_dir.exists():
+                    for item in sorted(skills_dir.iterdir()):
+                        skill_md = item / "SKILL.md"
+                        if item.is_dir() and skill_md.exists():
+                            result["plugin_skill_count"] += 1
+                            result["plugin_skill_names"].append(f"{plugin_name}:{item.name}")
+                            result["plugin_skill_tokens"] += estimate_tokens_from_frontmatter(skill_md)
+
+                # Commands
+                cmds_dir = install_path / "commands"
+                if cmds_dir.exists():
+                    for f in sorted(cmds_dir.glob("*.md")):
+                        result["plugin_cmd_count"] += 1
+                        result["plugin_cmd_names"].append(f"{plugin_name}:{f.stem}")
+                        result["plugin_cmd_tokens"] += estimate_tokens_from_frontmatter(f)
+                    for subdir in sorted(cmds_dir.iterdir()):
+                        if subdir.is_dir():
+                            for f in sorted(subdir.glob("*.md")):
+                                result["plugin_cmd_count"] += 1
+                                result["plugin_cmd_names"].append(f"{plugin_name}:{subdir.name}/{f.stem}")
+                                result["plugin_cmd_tokens"] += estimate_tokens_from_frontmatter(f)
+            except OSError:
+                continue
+    return result
+
+
 def measure_components():
     """Measure all controllable token overhead components."""
     components = {}
@@ -402,10 +471,11 @@ def measure_components():
             continue
         if path.exists():
             seen_real_paths.add(real)
+        raw_tokens = estimate_tokens_from_file(path)
         components[name] = {
             "path": str(path),
             "exists": path.exists(),
-            "tokens": estimate_tokens_from_file(path),
+            "tokens": (raw_tokens + CLAUDE_MD_INJECTION_OVERHEAD) if (path.exists() and raw_tokens > 0) else raw_tokens,
             "lines": count_lines(path),
         }
 
@@ -424,10 +494,11 @@ def measure_components():
                 real = resolve_real_path(claude_md)
                 if real not in seen_real_paths:
                     seen_real_paths.add(real)
+                    raw_tokens = estimate_tokens_from_file(claude_md)
                     components[comp_key] = {
                         "path": str(claude_md),
                         "exists": True,
-                        "tokens": estimate_tokens_from_file(claude_md),
+                        "tokens": (raw_tokens + CLAUDE_MD_INJECTION_OVERHEAD) if raw_tokens > 0 else raw_tokens,
                         "lines": count_lines(claude_md),
                     }
 
@@ -574,6 +645,20 @@ def measure_components():
         "names": cmd_names,
     }
 
+    # Plugin-bundled skills and commands
+    plugin_data = _scan_plugin_skills_and_commands()
+    components["plugin_skills"] = {
+        "count": plugin_data["plugin_skill_count"],
+        "tokens": plugin_data["plugin_skill_tokens"],
+        "names": plugin_data["plugin_skill_names"],
+        "plugins": plugin_data["plugins_found"],
+    }
+    components["plugin_commands"] = {
+        "count": plugin_data["plugin_cmd_count"],
+        "tokens": plugin_data["plugin_cmd_tokens"],
+        "names": plugin_data["plugin_cmd_names"],
+    }
+
     # MCP servers and deferred tools
     mcp = count_mcp_tools_and_servers()
     components["mcp_tools"] = {
@@ -713,6 +798,17 @@ def measure_components():
         "defaultModel": _cached_settings.get("model", None) if _cached_settings else None,
     }
 
+    # compactInstructions from settings.json
+    compact_instructions = ""
+    if _cached_settings:
+        raw_ci = _cached_settings.get("compactInstructions")
+        compact_instructions = raw_ci if isinstance(raw_ci, str) else ""
+    components["compact_instructions"] = {
+        "exists": bool(compact_instructions),
+        "tokens": int(len(compact_instructions) / CHARS_PER_TOKEN) if compact_instructions else 0,
+        "note": "Injected at compaction time, not startup. Included for completeness.",
+    }
+
     # Skill frontmatter quality (collected during skills scan above)
     components["skill_frontmatter_quality"] = {
         "verbose_count": len(verbose_skills),
@@ -735,7 +831,7 @@ def calculate_totals(components):
     # Keys that don't contribute direct token overhead (metadata only)
     non_token_keys = {
         "file_exclusion", "hooks", "settings_env", "settings_local",
-        "skill_frontmatter_quality", "skills_detail",
+        "skill_frontmatter_quality", "skills_detail", "compact_instructions",
     }
 
     for name, info in components.items():
@@ -767,6 +863,27 @@ def detect_context_window():
     return 200_000
 
 
+def detect_calibration_gap(components, totals, baselines=None):
+    """Compare estimated total against real session baselines. Returns gap info."""
+    if baselines is None:
+        baselines = get_session_baselines(5)
+    if not baselines:
+        return {"has_data": False, "note": "No session baselines available for calibration."}
+    avg_real = sum(b["baseline_tokens"] for b in baselines) / len(baselines)
+    estimated = totals["estimated_total"]
+    gap = avg_real - estimated
+    gap_pct = (gap / estimated * 100) if estimated > 0 else 0
+    return {
+        "has_data": True,
+        "avg_real_baseline": int(avg_real),
+        "estimated_total": estimated,
+        "gap_tokens": int(gap),
+        "gap_pct": round(gap_pct, 1),
+        "sessions_sampled": len(baselines),
+        "significant": abs(gap_pct) > 15,
+    }
+
+
 def sanitize_label(label):
     """Sanitize snapshot label to prevent path traversal."""
     if not re.match(r'^[a-zA-Z0-9_-]+$', label):
@@ -790,12 +907,15 @@ def take_snapshot(label):
     baselines = get_session_baselines(5)
     totals = calculate_totals(components)
 
+    calibration = detect_calibration_gap(components, totals, baselines)
+
     snapshot = {
         "label": label,
         "timestamp": datetime.now().isoformat(),
         "components": components,
         "session_baselines": baselines,
         "totals": totals,
+        "calibration": calibration,
         "context_window": detect_context_window(),
     }
 
@@ -841,10 +961,16 @@ def print_snapshot_summary(snapshot):
     # Skills
     s = c.get("skills", {})
     print(f"  {'Skills (frontmatter)':<35s} {s.get('tokens', 0):>6,} tokens  [{s.get('count', 0)} skills]")
+    ps = c.get("plugin_skills", {})
+    if ps.get("count", 0) > 0:
+        print(f"    {'+ Plugin skills':<33s} {ps.get('tokens', 0):>6,} tokens  [{ps.get('count', 0)} from {', '.join(ps.get('plugins', []))}]")
 
     # Commands
     cmd = c.get("commands", {})
     print(f"  {'Commands (frontmatter)':<35s} {cmd.get('tokens', 0):>6,} tokens  [{cmd.get('count', 0)} commands]")
+    pc = c.get("plugin_commands", {})
+    if pc.get("count", 0) > 0:
+        print(f"    {'+ Plugin commands':<33s} {pc.get('tokens', 0):>6,} tokens  [{pc.get('count', 0)} from plugins]")
 
     # MCP
     mcp = c.get("mcp_tools", {})
@@ -923,6 +1049,12 @@ def print_snapshot_summary(snapshot):
         names = [s["name"] for s in quality.get("verbose_skills", [])]
         print(f"  Verbose skill descriptions (>120 chars): {verbose_count} ({', '.join(names[:5])}{'...' if verbose_count > 5 else ''})")
 
+    # Calibration gap
+    cal = snapshot.get("calibration", {})
+    if cal.get("significant"):
+        print(f"\n  Calibration gap: estimated {t['estimated_total']:,} vs real {cal['avg_real_baseline']:,} ({cal['gap_pct']:+.0f}%)")
+        print(f"  (Based on {cal['sessions_sampled']} recent sessions. Gap likely from unmeasured system overhead.)")
+
 
 def compare_snapshots():
     """Compare before and after snapshots."""
@@ -993,18 +1125,18 @@ def compare_snapshots():
         ac.get("memory_md", {}).get("tokens", 0),
     ))
 
-    # Skills
+    # Skills (user + plugin)
     rows.append((
         "Skills",
-        bc.get("skills", {}).get("tokens", 0),
-        ac.get("skills", {}).get("tokens", 0),
+        bc.get("skills", {}).get("tokens", 0) + bc.get("plugin_skills", {}).get("tokens", 0),
+        ac.get("skills", {}).get("tokens", 0) + ac.get("plugin_skills", {}).get("tokens", 0),
     ))
 
-    # Commands
+    # Commands (user + plugin)
     rows.append((
         "Commands",
-        bc.get("commands", {}).get("tokens", 0),
-        ac.get("commands", {}).get("tokens", 0),
+        bc.get("commands", {}).get("tokens", 0) + bc.get("plugin_commands", {}).get("tokens", 0),
+        ac.get("commands", {}).get("tokens", 0) + ac.get("plugin_commands", {}).get("tokens", 0),
     ))
 
     # MCP (now included!)
@@ -1106,12 +1238,15 @@ def full_report():
     baselines = get_session_baselines(10)
     totals = calculate_totals(components)
 
+    calibration = detect_calibration_gap(components, totals, baselines)
+
     snapshot = {
         "label": "current",
         "timestamp": datetime.now().isoformat(),
         "components": components,
         "session_baselines": baselines,
         "totals": totals,
+        "calibration": calibration,
     }
 
     print(f"\n{'=' * 55}")
@@ -1317,10 +1452,13 @@ def generate_dashboard(coord_path):
     totals = calculate_totals(components)
     baselines = get_session_baselines(5)
 
+    calibration = detect_calibration_gap(components, totals, baselines)
+
     snapshot = {
         "components": components,
         "totals": totals,
         "session_baselines": baselines,
+        "calibration": calibration,
         "context_window": detect_context_window(),
     }
 
@@ -1682,11 +1820,15 @@ def generate_standalone_dashboard(days=30, quiet=False):
         print("  Measuring current token overhead...")
     components = measure_components()
     totals = calculate_totals(components)
+    baselines = get_session_baselines(5)
+
+    calibration = detect_calibration_gap(components, totals, baselines)
 
     snapshot = {
         "components": components,
         "totals": totals,
-        "session_baselines": get_session_baselines(5),
+        "session_baselines": baselines,
+        "calibration": calibration,
         "context_window": detect_context_window(),
     }
 

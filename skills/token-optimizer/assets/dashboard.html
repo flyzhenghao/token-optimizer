@@ -1585,8 +1585,13 @@ function getComponentDetails(data) {
     },
     {
       key: 'skills', name: 'Skills',
-      tokens: c.skills ? c.skills.tokens : 0,
-      sub: (c.skills ? c.skills.count : '?') + ' user skills loaded at startup',
+      tokens: (c.skills ? c.skills.tokens : 0) + (c.plugin_skills ? c.plugin_skills.tokens : 0),
+      sub: (function() {
+        var userCount = c.skills ? c.skills.count : 0;
+        var pluginCount = c.plugin_skills ? c.plugin_skills.count : 0;
+        if (pluginCount > 0) return userCount + ' user + ' + pluginCount + ' plugin skills';
+        return userCount + ' user skills loaded at startup';
+      })(),
       what: "Every skill's SKILL.md frontmatter (name + description) is loaded into the tool menu at session start. The description length directly controls token cost.",
       top: [], issues: [],
       related: [
@@ -1597,8 +1602,13 @@ function getComponentDetails(data) {
     },
     {
       key: 'commands', name: 'Commands',
-      tokens: c.commands ? c.commands.tokens : 0,
-      sub: (c.commands ? c.commands.count : '?') + ' slash commands registered',
+      tokens: (c.commands ? c.commands.tokens : 0) + (c.plugin_commands ? c.plugin_commands.tokens : 0),
+      sub: (function() {
+        var userCount = c.commands ? c.commands.count : 0;
+        var pluginCount = c.plugin_commands ? c.plugin_commands.count : 0;
+        if (pluginCount > 0) return userCount + ' user + ' + pluginCount + ' plugin commands';
+        return userCount + ' slash commands registered';
+      })(),
       what: "Each command's COMMAND.md file is parsed and registered. Commands with long descriptions consume tokens even if rarely used.",
       top: [], issues: [],
       related: [
@@ -1744,12 +1754,20 @@ var DB = (function() {
     var ct = 0; for (var k in c) { if (k.indexOf('claude_md') === 0 && c[k].tokens) ct += c[k].tokens; }
     vals.push(ct);
     vals.push(c.memory_md ? c.memory_md.tokens : 0);
-    vals.push(c.skills ? c.skills.tokens : 0);
-    vals.push(c.commands ? c.commands.tokens : 0);
+    vals.push((c.skills ? c.skills.tokens : 0) + (c.plugin_skills ? c.plugin_skills.tokens : 0));
+    vals.push((c.commands ? c.commands.tokens : 0) + (c.plugin_commands ? c.plugin_commands.tokens : 0));
+    var rulesTokens = c.rules ? c.rules.tokens : 0;
+    var importsTokens = c.imports ? c.imports.tokens : 0;
+    if (rulesTokens > 0) vals.push(rulesTokens);
+    if (importsTokens > 0) vals.push(importsTokens);
     vals.push(c.mcp_tools ? c.mcp_tools.tokens : 0);
     vals.push(c.core_system ? c.core_system.tokens : 0);
     var maxV = Math.max.apply(null, vals) || 1;
-    var barLabels = ['CLAUDE.md', 'MEMORY.md', 'Skills', 'Commands', 'MCP Tools', 'Core System'];
+    var barLabels = ['CLAUDE.md', 'MEMORY.md', 'Skills', 'Commands'];
+    if (rulesTokens > 0) barLabels.push('Rules');
+    if (importsTokens > 0) barLabels.push('@imports');
+    barLabels.push('MCP Tools');
+    barLabels.push('Core System');
     var memoryExists = c.memory_md && c.memory_md.exists !== false;
     var barsHtml = vals.map(function(v, i) {
       var w = Math.max(3, (v / maxV) * 100);
@@ -1764,6 +1782,21 @@ var DB = (function() {
     document.getElementById('chart-bars').innerHTML = barsHtml;
     document.getElementById('sat-desc').textContent =
       'Core System is fixed by Claude Code. Everything else is yours to trim. The bigger the bar, the more tokens you can save.';
+    var caveatEl = document.getElementById('sat-caveat');
+    if (!caveatEl) {
+      caveatEl = document.createElement('div');
+      caveatEl.id = 'sat-caveat';
+      caveatEl.style.cssText = 'font-size:11px;color:var(--c-muted);margin-top:6px;font-style:italic;';
+      document.getElementById('sat-desc').parentNode.appendChild(caveatEl);
+    }
+    var cal = data.snapshot.calibration;
+    if (cal && cal.has_data && cal.significant) {
+      caveatEl.textContent = 'Note: real session baseline averages ' + fn(cal.avg_real_baseline) +
+        ' tokens (' + (cal.gap_pct > 0 ? '+' : '') + cal.gap_pct + '% vs estimate). ' +
+        'Gap is from unmeasured system overhead (XML framing, MCP instructions).';
+    } else {
+      caveatEl.textContent = 'Estimate based on file sizes. Actual overhead includes XML framing and system wrappers not measured here.';
+    }
 
     // What You'd Save card
     var planTokens = Math.min(
