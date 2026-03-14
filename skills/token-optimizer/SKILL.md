@@ -1,6 +1,7 @@
 ---
 name: token-optimizer
-description: Find the ghost tokens. Audit Claude Code setup, see where 25-38% of your context goes, fix it. Use when context feels tight.
+description: Audit Claude Code setup to find and recover wasted context window tokens
+agents: [orchestrator, critic]
 ---
 
 # Token Optimizer: See Where Your Context Window Goes. Get It Back.
@@ -496,3 +497,12 @@ Backups are never automatically deleted. They accumulate in `~/.claude/_backups/
 - Use appropriate models (with fallbacks) for each task
 - Show before/after diffs
 - Frame savings as context budget (% of context window), not dollar amounts
+
+## Metadata
+- **版本**: v1.0.0
+- **修改日期**: 2026-03-04
+
+## Known Failures & Fixes
+
+| 日期 | 症状 | 根因 | 修复 | 版本 |
+|------|------|------|------|------|
